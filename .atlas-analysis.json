@@ -1,0 +1,126 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Polycule",
+  "projectDescription": "A comprehensive Nim SDK for interacting with Polymarket's CLOB, trading APIs, and real-time data streams",
+  "theme": "aspen",
+  "primaryColor": "#3B82F6",
+  "lightColor": "#60A5FA",
+  "darkColor": "#1E40AF",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/authentication",
+              "concepts/markets"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/trading",
+              "guides/websockets",
+              "guides/order-management",
+              "guides/market-data"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Client",
+            "pages": [
+              "api/polycule-client",
+              "api/configuration"
+            ]
+          },
+          {
+            "group": "CLOB",
+            "pages": [
+              "api/clob/overview",
+              "api/clob/l1-methods",
+              "api/clob/l2-methods",
+              "api/clob/public-methods"
+            ]
+          },
+          {
+            "group": "EVM",
+            "pages": [
+              "api/evm/overview",
+              "api/evm/contracts",
+              "api/evm/eip712"
+            ]
+          },
+          {
+            "group": "WebSockets",
+            "pages": [
+              "api/websockets/market-channel",
+              "api/websockets/user-channel",
+              "api/websockets/rtds"
+            ]
+          },
+          {
+            "group": "Gamma API",
+            "pages": [
+              "api/gamma"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/orders",
+              "api/types/trades",
+              "api/types/messages"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Complete CLOB (Central Limit Order Book) integration with L1/L2 methods",
+    "Real-time WebSocket support for market data, user orders, and trades",
+    "EVM smart contract interactions (CTF, CTF Exchange, ERC20)",
+    "EIP-712 signature support for secure order signing",
+    "Real-Time Data Socket (RTDS) for crypto price feeds",
+    "Type-safe order and trade management",
+    "Automatic reconnection and heartbeat for WebSocket connections",
+    "Support for multiple signature types (EOA, Proxy, Gnosis Safe)"
+  ],
+  "publicApiSurface": [
+    "newPolycule(signerKey, config, signatureType) -> PolyculeClient",
+    "setMarket(client, marketSlug)",
+    "buy(client, outcomeYes, size, price, postOrderOptions) -> OrderResponse",
+    "sell(client, outcomeYes, size, price, postOrderOptions) -> OrderResponse",
+    "createAndPostOrder(client, order, createOptions, postOptions) -> OrderResponse",
+    "cancelOrder(client, orderID) -> CancelOrdersResponse",
+    "getOpenOrders(client, params) -> OpenOrdersResponse",
+    "getTrades(client, params) -> seq[TradeResponse]",
+    "getOrderBook(tokenID) -> OrderBookSummary",
+    "MarketWss.connect(assetIds, customFeatures, config) -> MarketWss",
+    "UserWss.connect(marketIds, creds, customFeatures, config) -> UserWss",
+    "Rtds.connect(subscriptions, config) -> Rtds",
+    "listenToMarketWss(client)",
+    "listenToUserWss(client)",
+    "listenToRtds(client)",
+    "subscribe(ws, topic, msgType, filters)",
+    "getMarket(slug, includeTag) -> GammaMarketResponse",
+    "approveCollateral(client, amount) -> bool",
+    "depositCollateral(client, amount) -> bool",
+    "getCryptoCurrentMarketSlug(symbol, timeframe) -> string"
+  ]
+}
