@@ -1,0 +1,336 @@
+---
+title: "Public Methods"
+description: "Unauthenticated market data access for the CLOB"
+---
+
+Public methods provide unauthenticated access to market data, order books, and exchange information. These methods don't require API credentials and can be called directly.
+
+## Market Data
+
+### getOrderBook
+
+Get the current order book for a specific token.
+
+```nim
+proc getOrderBook(
+  tokenID: string
+): Future[Opt[OrderBookSummary]] {.async.}
+```
+
+<ParamField path="tokenID" type="string" required>
+  The token ID for the outcome token
+</ParamField>
+
+**Returns:** `Future[Opt[OrderBookSummary]]` - Order book with bids and asks
+
+**Example:**
+```nim
+import polycule/clob
+
+let book = await getOrderBook("123456")
+
+if book.isSome():
+  let orderBook = book.get()
+  
+  echo "Market: ", orderBook.market.get()
+  echo "Asset ID: ", orderBook.asset_id.get()
+  echo "Tick Size: ", orderBook.tick_size.get()
+  echo "Min Order Size: ", orderBook.min_order_size.get()
+  
+  # Display bids (buy orders)
+  echo "\nBids:"
+  for bid in orderBook.bids.get():
+    echo "  Price: ", bid.price.get(), " Size: ", bid.size.get()
+  
+  # Display asks (sell orders)
+  echo "\nAsks:"
+  for ask in orderBook.asks.get():
+    echo "  Price: ", ask.price.get(), " Size: ", ask.size.get()
+  
+  # Last trade price
+  if orderBook.last_trade_price.isSome():
+    echo "\nLast Trade: ", orderBook.last_trade_price.get()
+```
+
+---
+
+### getOrderBooks
+
+Get multiple order books in a single request.
+
+```nim
+proc getOrderBooks(
+  params: seq[BookParams]
+): Future[Opt[seq[OrderBookSummary]]] {.async.}
+```
+
+<ParamField path="params" type="seq[BookParams]" required>
+  Sequence of book parameters (token ID and side)
+</ParamField>
+
+**Returns:** `Future[Opt[seq[OrderBookSummary]]]` - Sequence of order books
+
+**Example:**
+```nim
+let params = @[
+  BookParams(token_id: "123456", side: BUY),
+  BookParams(token_id: "123456", side: SELL),
+  BookParams(token_id: "789012", side: BUY)
+]
+
+let books = await getOrderBooks(params)
+
+if books.isSome():
+  for book in books.get():
+    echo "Asset: ", book.asset_id.get()
+    echo "Bids: ", book.bids.get().len
+    echo "Asks: ", book.asks.get().len
+    echo "---"
+```
+
+---
+
+## Exchange Configuration
+
+### getTickSize
+
+Get the minimum tick size for a specific token.
+
+```nim
+proc getTickSize(
+  tokenId: string
+): Future[Opt[TickSizeResponse]] {.async.}
+```
+
+<ParamField path="tokenId" type="string" required>
+  The token ID to query
+</ParamField>
+
+**Returns:** `Future[Opt[TickSizeResponse]]` - Tick size response (defaults to TICK_0_01 if unavailable)
+
+**Example:**
+```nim
+let tickSizeResp = await getTickSize("123456")
+
+if tickSizeResp.isSome():
+  let tickSize = tickSizeResp.get().minimum_tick_size.get()
+  echo "Tick Size: ", tickSize
+  
+  # Use tick size for order creation
+  let options = CreateOrderOptions(
+    tickSize: tickSize,
+    negRisk: false
+  )
+```
+
+**Tick Sizes:**
+- `TICK_0_1` - $0.10 increments
+- `TICK_0_01` - $0.01 increments (default)
+- `TICK_0_001` - $0.001 increments
+- `TICK_0_0001` - $0.0001 increments
+
+---
+
+### getFeeRateBps
+
+Get the fee rate in basis points for a specific token.
+
+```nim
+proc getFeeRateBps(
+  tokenId: string
+): Future[Opt[FeeRateBpsResponse]] {.async.}
+```
+
+<ParamField path="tokenId" type="string" required>
+  The token ID to query
+</ParamField>
+
+**Returns:** `Future[Opt[FeeRateBpsResponse]]` - Fee rate response (defaults to 0 if unavailable)
+
+**Example:**
+```nim
+let feeResp = await getFeeRateBps("123456")
+
+if feeResp.isSome():
+  let feeBps = feeResp.get().base_fee.get()
+  echo "Base Fee: ", feeBps, " bps"
+  
+  # Calculate fee percentage
+  let feePercent = float(feeBps) / 100.0
+  echo "Fee Percentage: ", feePercent, "%"
+  
+  # Use in order creation
+  let order = UserOrder(
+    tokenID: "123456",
+    price: Price(0.65),
+    size: Size(10.0),
+    side: BUY,
+    feeRateBps: Opt.some(feeBps)
+  )
+```
+
+**Note:** Fee rates are in basis points (1 bps = 0.01%).
+
+---
+
+### getServerTimestamp
+
+Get the current server timestamp for synchronization.
+
+```nim
+proc getServerTimestamp(): Future[Opt[Timestamp]] {.async.}
+```
+
+**Returns:** `Future[Opt[Timestamp]]` - Current server timestamp in Unix milliseconds
+
+**Example:**
+```nim
+let timestamp = await getServerTimestamp()
+
+if timestamp.isSome():
+  echo "Server Time: ", timestamp.get()
+  
+  # Use for L1 authentication
+  let nonce = evmUint256(0)
+  let creds = await client.createApiCreds(timestamp.get(), nonce)
+```
+
+**Usage:** Server timestamps are required for L1 authentication and HMAC signature generation.
+
+---
+
+## Types
+
+### OrderBookSummary
+
+```nim
+type OrderBookSummary = object
+  market: Opt[string]              # Market identifier
+  asset_id: Opt[string]            # Token ID
+  timestamp: Opt[Timestamp]        # Book snapshot timestamp
+  bids: Opt[seq[OrderSummary]]     # Buy orders
+  asks: Opt[seq[OrderSummary]]     # Sell orders
+  min_order_size: Opt[Size]        # Minimum order size
+  tick_size: Opt[TickSize]         # Minimum price increment
+  neg_risk: Opt[bool]              # Negative risk enabled
+  last_trade_price: Opt[Price]     # Last trade price
+  hash: Opt[string]                # Order book hash
+```
+
+### OrderSummary
+
+```nim
+type OrderSummary = object
+  price: Opt[Price]  # Price level (0.0-1.0)
+  size: Opt[Size]    # Total size at this price level
+```
+
+### BookParams
+
+```nim
+type BookParams = object
+  token_id: string  # Token ID for the order book
+  side: Side        # BUY or SELL
+```
+
+### TickSizeResponse
+
+```nim
+type TickSizeResponse = object
+  minimum_tick_size: Opt[TickSize]
+```
+
+### FeeRateBpsResponse
+
+```nim
+type FeeRateBpsResponse = object
+  base_fee: Opt[uint32]  # Fee rate in basis points
+```
+
+### Timestamp
+
+```nim
+type Timestamp = distinct int64  # Unix timestamp in milliseconds
+```
+
+## Order Book Structure
+
+Order books contain:
+
+- **Bids**: Buy orders sorted by price (highest to lowest)
+- **Asks**: Sell orders sorted by price (lowest to highest)
+- **Spread**: Difference between best bid and best ask
+- **Depth**: Total liquidity at each price level
+
+**Example Analysis:**
+
+```nim
+let book = (await getOrderBook("123456")).get()
+
+let bestBid = book.bids.get()[0].price.get()
+let bestAsk = book.asks.get()[0].price.get()
+let spread = float(bestAsk) - float(bestBid)
+
+echo "Best Bid: ", bestBid
+echo "Best Ask: ", bestAsk
+echo "Spread: ", spread
+
+# Calculate total bid liquidity
+var totalBidSize = 0.0
+for bid in book.bids.get():
+  totalBidSize += float(bid.size.get())
+
+echo "Total Bid Liquidity: ", totalBidSize
+```
+
+## Fee Calculation
+
+Fees are charged in basis points (bps):
+
+```nim
+proc calculateFee(tradeSize: float, feeBps: uint32): float =
+  let feeRate = float(feeBps) / 10000.0
+  return tradeSize * feeRate
+
+# Example
+let feeResp = await getFeeRateBps("123456")
+let feeBps = feeResp.get().base_fee.get()
+let tradeSize = 100.0
+
+let fee = calculateFee(tradeSize, feeBps)
+echo "Fee: $", fee
+```
+
+## Best Practices
+
+1. **Use Server Time**: Always use `getServerTimestamp()` for authentication to avoid clock skew
+2. **Cache Tick Sizes**: Tick sizes rarely change, consider caching for performance
+3. **Monitor Order Books**: Poll `getOrderBook()` for real-time market data
+4. **Batch Requests**: Use `getOrderBooks()` to fetch multiple books efficiently
+5. **Validate Fees**: Always query current fee rates before creating orders
+6. **Handle Missing Data**: Public endpoints may return `Opt.none()`, always check before accessing
+
+## Real-Time Updates
+
+For real-time order book updates, consider using the WebSocket API instead of polling:
+
+```nim
+# WebSocket connection (separate module)
+import polycule/websocket
+
+let ws = newMarketWebSocket()
+await ws.subscribe("123456")
+
+# Handle book updates
+ws.onBook = proc(msg: BookMessage) {.async.} =
+  echo "Book updated at ", msg.timestamp.get()
+  echo "Best bid: ", msg.bids.get()[0].price.get()
+  echo "Best ask: ", msg.asks.get()[0].price.get()
+```
+
+## Related
+
+- [L1 Methods](/api/clob/l1-methods) - Authentication requires server timestamp
+- [L2 Methods](/api/clob/l2-methods) - Use market data for order creation
+- [CLOB Overview](/api/clob/overview) - Module introduction
+- [Polymarket CLOB API](https://docs.polymarket.com/developers/CLOB) - Official documentation

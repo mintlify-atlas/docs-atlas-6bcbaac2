@@ -1,0 +1,109 @@
+---
+title: "CLOB Overview"
+description: "Central Limit Order Book (CLOB) module for trading on Polymarket"
+---
+
+The CLOB (Central Limit Order Book) module provides a complete interface for interacting with Polymarket's order book trading system. It handles order creation, authentication, and market data retrieval.
+
+## What is CLOB?
+
+The Central Limit Order Book is Polymarket's core trading infrastructure that matches buy and sell orders for prediction market outcomes. The Polycule CLOB module provides three categories of methods:
+
+### L1 Methods (Authentication)
+
+L1 methods handle wallet-based authentication and cryptographic signing. These methods use EIP-712 signatures and manage API credentials:
+
+- **API Key Management**: Create and derive API keys from your wallet
+- **Order Signing**: Sign orders with your private key for submission
+- **Authentication**: Establish secure sessions with the CLOB
+
+L1 methods are foundational - you must authenticate before using L2 trading methods.
+
+### L2 Methods (Trading)
+
+L2 methods handle authenticated trading operations using HMAC-SHA256 signatures. These require active API credentials from L1 authentication:
+
+- **Order Management**: Post, cancel, and query orders
+- **Trade History**: Retrieve your trading activity
+- **Account Data**: Access your open positions and balances
+
+L2 methods require authentication headers with your API key, secret, and HMAC signature.
+
+### Public Methods (Market Data)
+
+Public methods provide unauthenticated access to market data:
+
+- **Order Books**: Get current bid/ask spreads
+- **Market Info**: Retrieve tick sizes and fee rates
+- **Server Time**: Synchronize with exchange timestamps
+
+Public methods don't require authentication and can be called directly.
+
+## Getting Started
+
+```nim
+import polycule/clob
+
+# Initialize client
+var client = newPolyculeClient()
+
+# L1: Authenticate (creates API credentials)
+let creds = await client.resolveL1Creds()
+
+# L2: Create and post an order
+let order = UserOrder(
+  tokenID: "123456",
+  price: Price(0.65),
+  size: Size(10.0),
+  side: BUY
+)
+
+let options = CreateOrderOptions(
+  tickSize: TICK_0_01,
+  negRisk: false
+)
+
+let result = await client.createAndPostOrder(order, options)
+
+# Public: Get order book
+let book = await getOrderBook("123456")
+```
+
+## Method Categories
+
+<CardGroup cols={3}>
+  <Card title="L1 Methods" icon="key" href="/api/clob/l1-methods">
+    Authentication and order signing
+  </Card>
+  
+  <Card title="L2 Methods" icon="chart-line" href="/api/clob/l2-methods">
+    Trading operations and order management
+  </Card>
+  
+  <Card title="Public Methods" icon="book" href="/api/clob/public-methods">
+    Unauthenticated market data access
+  </Card>
+</CardGroup>
+
+## Authentication Flow
+
+1. **L1 Authentication**: Use `resolveL1Creds()` to create or derive API credentials from your wallet
+2. **Store Credentials**: Save API key, secret, and passphrase to environment variables
+3. **L2 Operations**: Use credentials for authenticated trading operations
+4. **HMAC Signing**: Each L2 request is signed with HMAC-SHA256 using your secret
+
+## Order Types
+
+The CLOB supports multiple order execution types:
+
+- **GTC** (Good Till Canceled): Order remains active until filled or manually canceled
+- **FOK** (Fill or Kill): Order must be filled completely and immediately or canceled
+- **FAK** (Fill and Kill): Fill any amount immediately, cancel remainder
+- **GTD** (Good Till Date): Order expires at specified timestamp
+
+## Learn More
+
+- [L1 Methods Reference](/api/clob/l1-methods) - Authentication and signing
+- [L2 Methods Reference](/api/clob/l2-methods) - Trading operations
+- [Public Methods Reference](/api/clob/public-methods) - Market data
+- [Polymarket CLOB Documentation](https://docs.polymarket.com/developers/CLOB) - Official API docs

@@ -1,0 +1,558 @@
+---
+title: "Markets"
+description: "Understanding markets, condition IDs, asset IDs, and neg-risk markets in Polycule"
+---
+
+## Overview
+
+Markets in Polymarket represent prediction questions with binary or multi-outcome answers. The Polycule SDK provides comprehensive market handling through the `Market` type and associated functions.
+
+<Info>
+  Each market has two outcome tokens (YES and NO) represented by unique asset IDs derived from the market's condition ID.
+</Info>
+
+## Market Structure
+
+### Market Type
+
+```nim Reference
+# From src/polycule/global.nim:600-608
+type
+  Market* = ref object
+    slug*: string
+    isNegrisk*: bool
+    conditionId*: Opt[EvmBytes32]
+    assetIds*: Opt[array[2, EvmUInt256]]
+```
+
+<ParamField path="slug" type="string" required>
+  Human-readable market identifier (e.g., "will-btc-hit-100k-by-2024")
+</ParamField>
+
+<ParamField path="isNegrisk" type="bool" required>
+  Whether this is a negative-risk market (uses different contracts)
+</ParamField>
+
+<ParamField path="conditionId" type="EvmBytes32" required>
+  Unique blockchain identifier for this market condition
+</ParamField>
+
+<ParamField path="assetIds" type="array[2, EvmUInt256]">
+  Position IDs for [YES, NO] outcome tokens
+</ParamField>
+
+### Gamma Market Response
+
+Market metadata comes from the Gamma API:
+
+```nim Reference
+# From src/polycule/global.nim:586-593
+type
+  GammaMarketResponse* = object
+    id*: Opt[string]
+    question*: Opt[string]
+    conditionId*: Opt[string]
+    questionID*: Opt[string]
+    slug*: Opt[string]
+    negRisk*: Opt[bool]
+```
+
+## Setting the Current Market
+
+Before trading, you must set the active market on your client:
+
+```nim Reference
+# From src/polycule.nim:36-76
+proc setMarket*(client: PolyculeClient, marketSlug: string) {.async.} =
+  # Fetch market details from Gamma API
+  let gammaMarketResponse = await getMarket(marketSlug)
+  
+  if gammaMarketResponse.isOk():
+    let market = new(Market)
+    market.slug = gammaMarketResponse.value().slug.value()
+    market.isNegrisk = gammaMarketResponse.value().negRisk.value()
+    market.conditionId = Opt.some(
+      evmBytes32(gammaMarketResponse.value().conditionId.value())
+    )
+    market.resolvePositionIds()
+    client.currentMarket = Opt.some(market)
+```
+
+<Tabs>
+  <Tab title="Usage">
+    ```nim
+    import polycule
+    
+    # Set the current market
+    await client.setMarket("will-btc-hit-100k-by-2024")
+    
+    # Now you can trade on this market
+    let order = await client.buy(
+      outcomeYes = true,
+      size = Size(10.0),
+      price = Price(0.65)
+    )
+    ```
+  </Tab>
+  
+  <Tab title="Error Handling">
+    ```nim
+    try:
+      await client.setMarket("invalid-slug")
+    except Defect as e:
+      echo "Failed to set market: ", e.msg
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  Calling `setMarket()` is required before trading operations like `buy()` or `sell()`. The market context is used to determine contract addresses and compute asset IDs.
+</Warning>
+
+### Unsetting Market
+
+Clear the current market when switching contexts:
+
+```nim
+proc unsetMarket*(client: PolyculeClient)
+```
+
+## Condition IDs
+
+A **condition ID** is a unique 32-byte identifier for a market condition on the blockchain.
+
+<Accordion title="What is a Condition ID?">
+  In the Conditional Token Framework (CTF), each prediction market has a `conditionId` that represents the specific question being asked. This ID is used to:
+  
+  - Derive outcome token addresses (asset IDs)
+  - Split collateral into outcome tokens
+  - Merge outcome tokens back to collateral
+  - Redeem winning positions after market resolution
+  
+  The condition ID is deterministic based on the question parameters and oracle.
+</Accordion>
+
+### Format
+
+```nim
+type EvmBytes32* = FixedBytes[32]
+
+# Example condition ID:
+evmBytes32("0x1234...abcd")
+```
+
+## Asset IDs (Position IDs)
+
+Asset IDs uniquely identify outcome token positions on the blockchain.
+
+### Computing Asset IDs
+
+Asset IDs are cryptographically derived from the condition ID:
+
+```nim Reference
+# From src/polycule/evm/ctf.nim:48-96
+func getCollectionId(conditionId: EvmBytes32, indexSet: EvmUInt256): EvmBytes32 =
+  # Hash conditionId and indexSet
+  let hashData = concat(conditionId.data.toSeq, toBytesBE(indexSet).toSeq)
+  var x1 = EvmBytes32(keccak256(hashData)).to(EvmUInt256)
+  
+  # Find point on BN254 curve
+  # ... elliptic curve operations ...
+  
+  return x1.to(EvmBytes32)
+
+proc getPositionId(collateralToken: Address, collectionId: EvmBytes32): EvmUInt256 =
+  return EvmBytes32(
+    keccak256(concat(collateralToken.data.toSeq, collectionId.data.toSeq))
+  ).to(EvmUInt256)
+
+proc derivePositionId(
+    collateralToken: Address,
+    conditionId: EvmBytes32,
+    isYes: bool
+): EvmUInt256 =
+  var indexSet: EvmUInt256
+  if isYes:
+    indexSet = evmUint256(1)
+  else:
+    indexSet = evmUint256(2)
+  return collateralToken.getPositionId(getCollectionId(conditionId, indexSet))
+```
+
+<Steps>
+  <Step title="Collection ID">
+    Compute collection ID from condition ID and index set (1 for YES, 2 for NO) using cryptographic hashing and elliptic curve operations.
+  </Step>
+  
+  <Step title="Position ID">
+    Hash the collateral token address with the collection ID to get the final position ID.
+  </Step>
+  
+  <Step title="Asset ID Array">
+    Store both YES and NO position IDs as `array[2, EvmUInt256]`.
+  </Step>
+</Steps>
+
+### Resolving Position IDs
+
+The `resolvePositionIds()` function computes both outcome token IDs:
+
+```nim Reference
+# From src/polycule/evm/ctf.nim:98-109
+proc resolvePositionIds*(market: Market) =
+  market.assetIds = Opt.some([
+    market.contractConfig().collateral.derivePositionId(
+      market.conditionId.get(),
+      true   # YES outcome
+    ),
+    market.contractConfig().collateral.derivePositionId(
+      market.conditionId.get(),
+      false  # NO outcome
+    )
+  ])
+```
+
+<Note>
+  This function is automatically called by `setMarket()`, so you don't need to call it manually.
+</Note>
+
+### Using Asset IDs
+
+Asset IDs are used throughout trading operations:
+
+```nim
+# Access YES token ID
+let yesTokenId = client.currentMarket.value().assetIds.value()[0]
+
+# Access NO token ID  
+let noTokenId = client.currentMarket.value().assetIds.value()[1]
+
+# Check token balance
+let balance = await client.assetsBalance()
+echo "YES tokens: ", balance.value()[0]
+echo "NO tokens: ", balance.value()[1]
+```
+
+## Market Types
+
+### Standard Markets
+
+Standard markets use the regular CTF contracts:
+
+<CodeGroup>
+```nim Mainnet (Polygon)
+COLLATERAL_TOKEN = address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")  # USDC
+CTF = address("0x4D97DCd97eC945f40cF65F87097ACe5EA0476045")
+CTF_EXCHANGE = address("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
+```
+
+```nim Testnet (Amoy)
+COLLATERAL_TOKEN = address("0x9c4e1703476e875070ee25b56a58b008cfb8fa78")
+CTF = address("0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB")
+CTF_EXCHANGE = address("0xdFE02Eb6733538f8Ea35D585af8DE5958AD99E40")
+```
+</CodeGroup>
+
+### Neg-Risk Markets
+
+**Negative-risk markets** use a different contract set to enable special market mechanics:
+
+<CodeGroup>
+```nim Mainnet (Polygon)
+NEGRISK_WRAPPED_COLLATERAL_TOKEN = 
+  address("0x3A3BD7bb9528E159577F7C2e685CC81A765002E2")
+NEGRISK_CTF = address("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
+NEGRISK_CTF_EXCHANGE = address("0xC5d563A36AE78145C45a50134d48A1215220f80a")
+```
+
+```nim Testnet (Amoy)  
+NEGRISK_WRAPPED_COLLATERAL_TOKEN =
+  address("0x3A3BD7bb9528E159577F7C2e685CC81A765002E2")
+NEGRISK_CTF = address("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
+NEGRISK_CTF_EXCHANGE = address("0xC5d563A36AE78145C45a50134d48A1215220f80a")
+```
+</CodeGroup>
+
+<Accordion title="What are Neg-Risk Markets?">
+  Neg-risk (negative risk) markets are a special type of prediction market where:
+  
+  - Traders can only lose a maximum of their collateral
+  - Short positions don't carry unlimited risk
+  - Uses wrapped collateral tokens for risk management
+  - Requires different CTF and exchange contracts
+  
+  The SDK automatically detects neg-risk markets from the Gamma API response and uses the appropriate contracts.
+</Accordion>
+
+### Contract Configuration
+
+The SDK automatically selects contracts based on market type:
+
+```nim Reference
+# From src/polycule/global.nim:626-636
+proc contractConfig*(market: Market): ContractConfig =
+  if market.isNegrisk:
+    return ContractConfig(
+      collateral: NEGRISK_WRAPPED_COLLATERAL_TOKEN,
+      ctf: NEGRISK_CTF,
+      exchange: NEGRISK_CTF_EXCHANGE
+    )
+  else:
+    return ContractConfig(
+      collateral: COLLATERAL_TOKEN,
+      ctf: CTF,
+      exchange: CTF_EXCHANGE
+    )
+```
+
+## Trading on Markets
+
+Once a market is set, you can execute trades:
+
+### Buying Outcome Tokens
+
+```nim
+proc buy*(
+    client: PolyculeClient,
+    outcomeYes: bool,
+    size: Size,
+    price: Price,
+    postOrderOptions = PostOrderOptions(orderType: OrderType.GTC, postOnly: true)
+): Future[Result[OrderResponse, string]]
+```
+
+<CodeGroup>
+```nim Buy YES
+await client.setMarket("will-btc-hit-100k")
+
+let order = await client.buy(
+  outcomeYes = true,    # Buy YES tokens
+  size = Size(10.0),    # Buy 10 tokens
+  price = Price(0.65)   # At $0.65 per token
+)
+```
+
+```nim Buy NO
+await client.setMarket("will-btc-hit-100k")
+
+let order = await client.buy(
+  outcomeYes = false,   # Buy NO tokens
+  size = Size(10.0),
+  price = Price(0.35)
+)
+```
+</CodeGroup>
+
+### Selling Outcome Tokens
+
+```nim
+proc sell*(
+    client: PolyculeClient,
+    outcomeYes: bool,
+    size: Size,
+    price: Price,
+    postOrderOptions = PostOrderOptions(orderType: OrderType.GTC, postOnly: true)
+): Future[Result[OrderResponse, string]]
+```
+
+### Token Selection Logic
+
+The buy/sell functions automatically select the correct token ID:
+
+```nim Reference
+# From src/polycule.nim:89-94
+let tokenId =
+  if outcomeYes:
+    $(client.currentMarket.value().assetIds.value()[0])  # YES token
+  else:
+    $(client.currentMarket.value().assetIds.value()[1])  # NO token
+```
+
+## Market Queries
+
+### Get Market Info
+
+```nim
+import polycule/gamma
+
+proc getMarket*(
+    slug: string,
+    includeTag = false
+): Future[Opt[GammaMarketResponse]]
+```
+
+<Tabs>
+  <Tab title="Basic Query">
+    ```nim
+    let marketInfo = await getMarket("will-btc-hit-100k")
+    
+    if marketInfo.isSome():
+      let market = marketInfo.get()
+      echo "Question: ", market.question.get()
+      echo "Condition ID: ", market.conditionId.get()
+      echo "Neg-risk: ", market.negRisk.get()
+    ```
+  </Tab>
+  
+  <Tab title="With Tags">
+    ```nim
+    let marketInfo = await getMarket(
+      "will-btc-hit-100k",
+      includeTag = true
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Check Asset Balances
+
+```nim
+proc assetsBalance*(client: PolyculeClient): 
+  Future[Opt[array[2, EvmUInt256]]]
+```
+
+```nim
+# Get your token balances for current market
+let balances = await client.assetsBalance()
+
+if balances.isSome():
+  let [yesBalance, noBalance] = balances.get()
+  echo "YES tokens: ", yesBalance
+  echo "NO tokens: ", noBalance
+```
+
+## CTF Operations
+
+The Conditional Token Framework allows you to split and merge positions:
+
+### Split Position
+
+Convert collateral (USDC) into outcome tokens:
+
+```nim
+proc splitPosition*(client: PolyculeClient, amount: EvmUInt256): 
+  Future[Opt[void]]
+```
+
+```nim
+import polycule/evm/common
+
+# Split 100 USDC into YES + NO tokens
+let result = await client.splitPosition(usdc(100))
+
+if result.isOk():
+  echo "Successfully split position"
+  # Now you have 100 YES tokens + 100 NO tokens
+```
+
+<Info>
+  Splitting creates an equal amount of both outcome tokens. This is useful for providing liquidity or taking both sides of a market.
+</Info>
+
+### Merge Positions
+
+Convert outcome tokens back to collateral:
+
+```nim
+proc mergePositions*(client: PolyculeClient, amount: EvmUInt256):
+  Future[Opt[void]]
+```
+
+```nim
+# Merge 50 YES + 50 NO tokens back to 50 USDC
+let result = await client.mergePositions(usdc(50))
+
+if result.isOk():
+  echo "Successfully merged positions"
+  # Now you have 50 USDC collateral
+```
+
+<Warning>
+  You must own equal amounts of YES and NO tokens to merge. The merge amount is the minimum of your YES and NO balances.
+</Warning>
+
+### Redeem Positions
+
+After market resolution, redeem winning tokens for collateral:
+
+```nim
+proc redeemPositions*(client: PolyculeClient): Future[Opt[void]]
+```
+
+```nim
+# Redeem all winning tokens after market resolves
+let result = await client.redeemPositions()
+
+if result.isOk():
+  echo "Successfully redeemed positions"
+```
+
+## Complete Example
+
+```nim
+import polycule
+import polycule/evm/common
+import std/[os, uri]
+
+proc main() {.async.} =
+  # Initialize client
+  let client = await newPolycule(
+    PrivateKey.fromHex(getEnv("PRIVATE_KEY")),
+    PolyculeConfig(rpcUrl: Opt.some(parseUri("https://polygon-rpc.com"))),
+    SignatureType.EOA
+  )
+  
+  # Set market context
+  await client.setMarket("will-btc-hit-100k-by-2024")
+  
+  # Check market details
+  if client.currentMarket.isSome():
+    let market = client.currentMarket.get()
+    echo "Trading on: ", market.slug
+    echo "Neg-risk: ", market.isNegrisk
+    echo "Condition ID: ", market.conditionId.get()
+    
+    # Check balances
+    let balances = await client.assetsBalance()
+    if balances.isSome():
+      echo "YES balance: ", balances.get()[0]
+      echo "NO balance: ", balances.get()[1]
+    
+    # Place a buy order
+    let order = await client.buy(
+      outcomeYes = true,
+      size = Size(10.0),
+      price = Price(0.65)
+    )
+    
+    if order.isOk():
+      echo "Order placed: ", order.value().orderID.get()
+    else:
+      echo "Order failed: ", order.error()
+  
+  # Switch to different market
+  await client.setMarket("another-market-slug")
+  # ... trade on new market ...
+  
+  # Clean up
+  client.unsetMarket()
+
+waitFor main()
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trading Guide" icon="arrow-right-arrow-left" href="/guides/trading">
+    Learn how to place and manage orders
+  </Card>
+  <Card title="WebSocket Streams" icon="signal-stream" href="/guides/websockets">
+    Stream real-time market data
+  </Card>
+  <Card title="EVM Contracts" icon="split" href="/api/evm/contracts">
+    CTF contract operations
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/polycule-client">
+    Complete API documentation
+  </Card>
+</CardGroup>

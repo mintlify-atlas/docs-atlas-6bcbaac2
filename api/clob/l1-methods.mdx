@@ -1,0 +1,359 @@
+---
+title: "L1 Methods"
+description: "Authentication and order signing methods for the CLOB"
+---
+
+L1 methods handle wallet-based authentication and cryptographic signing using EIP-712 signatures. These methods are foundational for accessing L2 trading operations.
+
+## Authentication Methods
+
+### createApiCreds
+
+Creates new API credentials by signing an authentication message with your wallet.
+
+```nim
+proc createApiCreds(
+  client: PolyculeClient,
+  timestamp: Timestamp,
+  nonce: EvmUInt256
+): Future[Opt[ApiKeyCreds]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="timestamp" type="Timestamp" required>
+  Server timestamp for request synchronization
+</ParamField>
+
+<ParamField path="nonce" type="EvmUInt256" required>
+  Unique nonce for the authentication request (typically 0)
+</ParamField>
+
+**Returns:** `Future[Opt[ApiKeyCreds]]` - API credentials containing key, secret, and passphrase
+
+**Example:**
+```nim
+let timestamp = (await getServerTimestamp()).get()
+let nonce = evmUint256(0)
+let creds = await client.createApiCreds(timestamp, nonce)
+
+if creds.isSome():
+  echo "API Key: ", creds.get().apiKey.get()
+  echo "Secret: ", creds.get().secret.get()
+  echo "Passphrase: ", creds.get().passphrase.get()
+```
+
+---
+
+### deriveApiCreds
+
+Derives existing API credentials from your wallet without creating new ones.
+
+```nim
+proc deriveApiCreds(
+  client: PolyculeClient,
+  timestamp: Timestamp,
+  nonce: EvmUInt256
+): Future[Opt[ApiKeyCreds]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="timestamp" type="Timestamp" required>
+  Server timestamp for request synchronization
+</ParamField>
+
+<ParamField path="nonce" type="EvmUInt256" required>
+  Unique nonce for the authentication request (typically 0)
+</ParamField>
+
+**Returns:** `Future[Opt[ApiKeyCreds]]` - Existing API credentials for your wallet
+
+**Example:**
+```nim
+let timestamp = (await getServerTimestamp()).get()
+let nonce = evmUint256(0)
+let creds = await client.deriveApiCreds(timestamp, nonce)
+```
+
+---
+
+### deriveOrCreateApiCreds
+
+Attempts to derive existing API credentials, falling back to creating new ones if none exist.
+
+```nim
+proc deriveOrCreateApiCreds(
+  client: PolyculeClient
+): Future[Opt[ApiKeyCreds]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+**Returns:** `Future[Opt[ApiKeyCreds]]` - API credentials (existing or newly created)
+
+**Example:**
+```nim
+let creds = await client.deriveOrCreateApiCreds()
+if creds.isSome():
+  # Store credentials for future use
+  echo "API Key: ", creds.get().apiKey.get()
+```
+
+---
+
+### resolveL1Creds
+
+Resolves API credentials by checking environment variables first, then deriving or creating as needed.
+
+```nim
+proc resolveL1Creds(
+  client: PolyculeClient
+): Future[Opt[ApiKeyCreds]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+**Returns:** `Future[Opt[ApiKeyCreds]]` - Resolved API credentials
+
+**Example:**
+```nim
+# Checks for API_KEY, API_SECRET, API_PASSPHRASE env vars
+let creds = await client.resolveL1Creds()
+
+if creds.isSome():
+  # Credentials resolved successfully
+  client.user.value().wallet.auth = creds
+else:
+  echo "Failed to resolve credentials"
+```
+
+**Environment Variables:**
+- `API_KEY` - Your Polymarket API key
+- `API_SECRET` - Your API secret (base64 encoded)
+- `API_PASSPHRASE` - Your API passphrase
+
+If environment variables are not set, this method will derive or create credentials and display them for you to save.
+
+---
+
+## Order Signing Methods
+
+### buildL1CLOBSig
+
+Builds an EIP-712 signature for CLOB authentication.
+
+```nim
+proc buildL1CLOBSig(
+  client: PolyculeClient,
+  timestamp: Timestamp,
+  nonce: EvmUInt256
+): string
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="timestamp" type="Timestamp" required>
+  Server timestamp for the signature
+</ParamField>
+
+<ParamField path="nonce" type="EvmUInt256" required>
+  Unique nonce for the signature
+</ParamField>
+
+**Returns:** `string` - EIP-712 signature for authentication
+
+**Example:**
+```nim
+let timestamp = (await getServerTimestamp()).get()
+let nonce = evmUint256(0)
+let signature = client.buildL1CLOBSig(timestamp, nonce)
+```
+
+---
+
+### buildOrderSignature
+
+Builds an EIP-712 signature for order submission.
+
+```nim
+proc buildOrderSignature(
+  client: PolyculeClient,
+  order: UserOrder,
+  salt: EvmUInt256,
+  makerAmount: EvmUInt256,
+  takerAmount: EvmUInt256
+): string
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="order" type="UserOrder" required>
+  The order to sign
+</ParamField>
+
+<ParamField path="salt" type="EvmUInt256" required>
+  Random salt for order uniqueness
+</ParamField>
+
+<ParamField path="makerAmount" type="EvmUInt256" required>
+  Amount the maker provides (in token units)
+</ParamField>
+
+<ParamField path="takerAmount" type="EvmUInt256" required>
+  Amount the taker provides (in token units)
+</ParamField>
+
+**Returns:** `string` - EIP-712 signature for the order
+
+**Example:**
+```nim
+let order = UserOrder(
+  tokenID: "123456",
+  price: Price(0.65),
+  size: Size(10.0),
+  side: BUY
+)
+
+let salt = evmUint256(rand(getTime().toUnix()))
+let config = getRoundConfig(TICK_0_01)
+let amounts = getOrderRawAmounts(order, config)
+
+let signature = client.buildOrderSignature(
+  order,
+  salt,
+  amounts.makerAmount,
+  amounts.takerAmount
+)
+```
+
+---
+
+### createOrder
+
+Creates a signed order ready for submission to the CLOB.
+
+```nim
+proc createOrder(
+  client: PolyculeClient,
+  order: UserOrder,
+  options: CreateOrderOptions
+): Opt[SignedOrder]
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="order" type="UserOrder" required>
+  The order parameters
+</ParamField>
+
+<ParamField path="options" type="CreateOrderOptions" required>
+  Order creation options (tick size, negative risk settings)
+</ParamField>
+
+**Returns:** `Opt[SignedOrder]` - Signed order ready for posting, or none if validation fails
+
+**Example:**
+```nim
+let order = UserOrder(
+  tokenID: "123456",
+  price: Price(0.65),
+  size: Size(10.0),
+  side: BUY,
+  feeRateBps: Opt.some(0'u32),
+  nonce: Opt.some(evmUint256(0)),
+  expiration: Opt.some(Timestamp(0)),  # 0 = no expiration
+  taker: Opt.none(Address)  # Any taker
+)
+
+let options = CreateOrderOptions(
+  tickSize: TICK_0_01,
+  negRisk: false
+)
+
+let signedOrder = client.createOrder(order, options)
+
+if signedOrder.isSome():
+  # Order created and signed successfully
+  let result = await client.postOrder(signedOrder.get())
+```
+
+## Types
+
+### ApiKeyCreds
+
+```nim
+type ApiKeyCreds = object
+  apiKey: Opt[string]
+  secret: Opt[string]
+  passphrase: Opt[string]
+```
+
+### UserOrder
+
+```nim
+type UserOrder = object
+  tokenID: string           # Token ID for the outcome
+  price: Price              # Price per token (0.0-1.0)
+  size: Size                # Number of tokens to trade
+  side: Side                # BUY or SELL
+  feeRateBps: Opt[uint32]   # Fee rate in basis points (optional)
+  nonce: Opt[EvmUInt256]    # Order nonce (optional)
+  expiration: Opt[Timestamp] # Expiration timestamp (optional, 0 = no expiration)
+  taker: Opt[Address]       # Specific taker address (optional)
+```
+
+### CreateOrderOptions
+
+```nim
+type CreateOrderOptions = object
+  tickSize: TickSize  # TICK_0_1, TICK_0_01, TICK_0_001, or TICK_0_0001
+  negRisk: bool       # Whether negative risk is enabled
+```
+
+### SignedOrder
+
+```nim
+type SignedOrder = object
+  salt: int            # Random value for uniqueness
+  maker: string        # Maker address
+  signer: string       # Signer address
+  taker: string        # Taker address (zero address for any)
+  tokenId: string      # Token ID
+  makerAmount: string  # Amount maker provides
+  takerAmount: string  # Amount taker provides
+  side: int            # 0 = BUY, 1 = SELL
+  expiration: string   # Expiration timestamp
+  nonce: string        # Order nonce
+  feeRateBps: string   # Fee rate in basis points
+  signatureType: int   # 0 = EOA, 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE
+  signature: string    # EIP-712 signature
+```
+
+## Best Practices
+
+1. **Store Credentials Securely**: Save API credentials to environment variables, never hardcode them
+2. **Use resolveL1Creds**: Simplifies credential management by checking env vars first
+3. **Reuse Credentials**: Derive existing credentials instead of creating new ones repeatedly
+4. **Validate Orders**: The `createOrder` function validates orders before signing
+5. **Handle Errors**: Always check if `Opt` return values contain data before accessing
+
+## Related
+
+- [L2 Methods](/api/clob/l2-methods) - Use these credentials for trading operations
+- [Public Methods](/api/clob/public-methods) - No authentication required
+- [CLOB Overview](/api/clob/overview) - Module introduction

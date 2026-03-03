@@ -1,0 +1,259 @@
+---
+title: 'PolyculeClient'
+description: 'Core client for interacting with Polymarket'
+---
+
+## PolyculeClient
+
+The main client type for interacting with the Polymarket CLOB and Gamma APIs.
+
+### Type Definition
+
+```nim
+PolyculeClient = ref object
+  config: PolyculeConfig
+  user: Opt[User]
+  currentMarket: Opt[Market]
+```
+
+<ParamField path="config" type="PolyculeConfig">
+  Client configuration including RPC URL and builder credentials
+</ParamField>
+
+<ParamField path="user" type="Opt[User]">
+  Optional user object containing wallet and authentication information
+</ParamField>
+
+<ParamField path="currentMarket" type="Opt[Market]">
+  Currently selected market for trading operations
+</ParamField>
+
+---
+
+## newPolycule()
+
+Creates and initializes a new PolyculeClient instance.
+
+```nim
+proc newPolycule*(
+  signerKey: PrivateKey,
+  config: PolyculeConfig,
+  signatureType = SignatureType.EOA
+): Future[PolyculeClient] {.async.}
+```
+
+### Parameters
+
+<ParamField path="signerKey" type="PrivateKey" required>
+  Private key for signing transactions and orders
+</ParamField>
+
+<ParamField path="config" type="PolyculeConfig" required>
+  Configuration object containing RPC URL and optional builder credentials
+</ParamField>
+
+<ParamField path="signatureType" type="SignatureType" default="SignatureType.EOA">
+  Type of signature to use:
+  - `EOA` - Externally Owned Account (standard wallet)
+  - `POLY_PROXY` - Polymarket Proxy
+  - `POLY_GNOSIS_SAFE` - Polymarket Gnosis Safe
+</ParamField>
+
+### Returns
+
+<ResponseField name="client" type="Future[PolyculeClient]">
+  A configured PolyculeClient instance ready for trading operations
+</ResponseField>
+
+### Example
+
+```nim
+let config = PolyculeConfig(
+  rpcUrl: Opt.some(parseUri("https://polygon-rpc.com")),
+  builderCreds: Opt.none(ApiKeyCreds)
+)
+
+let client = await newPolycule(privateKey, config)
+```
+
+---
+
+## setMarket()
+
+Sets the current market for trading operations by market slug.
+
+```nim
+proc setMarket*(client: PolyculeClient, marketSlug: string) {.async.}
+```
+
+### Parameters
+
+<ParamField path="client" type="PolyculeClient" required>
+  The PolyculeClient instance
+</ParamField>
+
+<ParamField path="marketSlug" type="string" required>
+  Market identifier slug from Polymarket (e.g., "presidential-election-2024")
+</ParamField>
+
+### Behavior
+
+Fetches market details from the Gamma API and configures the client for trading on the specified market. Sets up market metadata including condition ID, asset IDs, and neg-risk status.
+
+### Example
+
+```nim
+await client.setMarket("will-btc-hit-100k")
+```
+
+---
+
+## unsetMarket()
+
+Clears the currently selected market from the client.
+
+```nim
+proc unsetMarket*(client: PolyculeClient)
+```
+
+### Parameters
+
+<ParamField path="client" type="PolyculeClient" required>
+  The PolyculeClient instance
+</ParamField>
+
+### Behavior
+
+Destroys the current market reference, allowing you to switch to a different market or clean up resources.
+
+### Example
+
+```nim
+client.unsetMarket()
+```
+
+---
+
+## buy()
+
+Places a buy order on the current market.
+
+```nim
+proc buy*(
+  client: PolyculeClient,
+  outcomeYes: bool,
+  size: Size,
+  price: Price,
+  postOrderOptions = PostOrderOptions(orderType: OrderType.GTC, postOnly: true)
+): Future[Result[OrderResponse, string]] {.async.}
+```
+
+### Parameters
+
+<ParamField path="client" type="PolyculeClient" required>
+  The PolyculeClient instance with a market set
+</ParamField>
+
+<ParamField path="outcomeYes" type="bool" required>
+  - `true` to buy YES outcome tokens
+  - `false` to buy NO outcome tokens
+</ParamField>
+
+<ParamField path="size" type="Size" required>
+  Number of outcome tokens to buy (as a float wrapped in Size type)
+</ParamField>
+
+<ParamField path="price" type="Price" required>
+  Price per token in the range 0.0 to 1.0 (e.g., 0.65 = $0.65 per token)
+</ParamField>
+
+<ParamField path="postOrderOptions" type="PostOrderOptions" default="PostOrderOptions(orderType: OrderType.GTC, postOnly: true)">
+  Order execution options:
+  - `orderType`: GTC, FOK, FAK, or GTD
+  - `postOnly`: If true, order will only add liquidity (maker only)
+</ParamField>
+
+### Returns
+
+<ResponseField name="result" type="Future[Result[OrderResponse, string]]">
+  Success with OrderResponse containing order ID and status, or error string if the order failed
+</ResponseField>
+
+### Example
+
+```nim
+# Buy 100 YES tokens at $0.65 each
+let result = await client.buy(
+  outcomeYes = true,
+  size = Size(100.0),
+  price = Price(0.65)
+)
+
+if result.isOk():
+  echo "Order ID: ", result.value().orderID.value()
+else:
+  echo "Error: ", result.error()
+```
+
+---
+
+## sell()
+
+Places a sell order on the current market.
+
+```nim
+proc sell*(
+  client: PolyculeClient,
+  outcomeYes: bool,
+  size: Size,
+  price: Price,
+  postOrderOptions = PostOrderOptions(orderType: OrderType.GTC, postOnly: true)
+): Future[Result[OrderResponse, string]] {.async.}
+```
+
+### Parameters
+
+<ParamField path="client" type="PolyculeClient" required>
+  The PolyculeClient instance with a market set
+</ParamField>
+
+<ParamField path="outcomeYes" type="bool" required>
+  - `true` to sell YES outcome tokens
+  - `false` to sell NO outcome tokens
+</ParamField>
+
+<ParamField path="size" type="Size" required>
+  Number of outcome tokens to sell (as a float wrapped in Size type)
+</ParamField>
+
+<ParamField path="price" type="Price" required>
+  Price per token in the range 0.0 to 1.0 (e.g., 0.55 = $0.55 per token)
+</ParamField>
+
+<ParamField path="postOrderOptions" type="PostOrderOptions" default="PostOrderOptions(orderType: OrderType.GTC, postOnly: true)">
+  Order execution options:
+  - `orderType`: GTC, FOK, FAK, or GTD
+  - `postOnly`: If true, order will only add liquidity (maker only)
+</ParamField>
+
+### Returns
+
+<ResponseField name="result" type="Future[Result[OrderResponse, string]]">
+  Success with OrderResponse containing order ID and status, or error string if the order failed
+</ResponseField>
+
+### Example
+
+```nim
+# Sell 50 NO tokens at $0.45 each
+let result = await client.sell(
+  outcomeYes = false,
+  size = Size(50.0),
+  price = Price(0.45)
+)
+
+if result.isOk():
+  echo "Order ID: ", result.value().orderID.value()
+else:
+  echo "Error: ", result.error()
+```

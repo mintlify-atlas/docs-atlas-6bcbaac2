@@ -1,0 +1,192 @@
+---
+title: "EVM Module Overview"
+description: "Ethereum Virtual Machine integration for Polymarket smart contracts"
+---
+
+The EVM module provides comprehensive integration with Polymarket's smart contracts on Polygon. It handles interactions with the Conditional Token Framework (CTF), exchange contracts, and ERC20 collateral tokens.
+
+## Module Structure
+
+The EVM module is organized into several specialized submodules:
+
+- **common**: Core EVM types, constants, and utilities
+- **ctf**: Conditional Token Framework contract interface
+- **ctf_exchange**: Exchange contract helpers
+- **erc20**: ERC20 token operations for collateral
+- **eip712**: EIP-712 typed data signing for orders
+
+## Chain Configuration
+
+The module supports both Polygon mainnet and testnet (Amoy):
+
+```nim
+import polycule/evm
+
+# Chain ID is configured at compile time
+# Default: 137 (Polygon mainnet)
+# Testnet: 80002 (Polygon Amoy)
+```
+
+### Mainnet Addresses (Chain ID 137)
+
+```nim
+const
+  COLLATERAL_TOKEN = address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
+  CTF = address("0x4D97DCd97eC945f40cF65F87097ACe5EA0476045")
+  CTF_EXCHANGE = address("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
+  NEGRISK_CTF = address("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296")
+  NEGRISK_CTF_EXCHANGE = address("0xC5d563A36AE78145C45a50134d48A1215220f80a")
+```
+
+### Testnet Addresses (Chain ID 80002)
+
+```nim
+const
+  COLLATERAL_TOKEN = address("0x9c4e1703476e875070ee25b56a58b008cfb8fa78")
+  CTF = address("0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB")
+  CTF_EXCHANGE = address("0xdFE02Eb6733538f8Ea35D585af8DE5958AD99E40")
+```
+
+## EVM Type System
+
+The module provides comprehensive type support for Solidity types:
+
+### Fixed Bytes Types
+
+```nim
+type
+  EvmBytes1 = FixedBytes[1]
+  EvmBytes2 = FixedBytes[2]
+  # ... up to EvmBytes32
+  EvmBytes32 = FixedBytes[32]
+
+# Create from hex string
+let data = evmbytes32("0x1234...")
+```
+
+### Unsigned Integers
+
+```nim
+type
+  EvmUInt8 = StUInt[8]
+  EvmUInt16 = StUInt[16]
+  # ... up to EvmUInt256
+  EvmUInt256 = StUInt[256]
+
+# Create from integer
+let amount = evmuint256(1000)
+
+# Create from string
+let bigAmount = evmuint256("1000000000000000000")
+```
+
+### Signed Integers
+
+```nim
+type
+  EvmInt8 = StInt[8]
+  EvmInt16 = StInt[16]
+  # ... up to EvmInt256
+  EvmInt256 = StInt[256]
+
+# Create from integer
+let value = evmint256(-100)
+
+# Create from string
+let bigValue = evmint256("-1000000000000000000")
+```
+
+## Unit Conversion Utilities
+
+The module provides convenient functions for working with USDC and share amounts:
+
+### USDC (6 decimals)
+
+```nim
+# From integer
+let amount1 = usdc(100)  # 100 USDC = 100_000_000 base units
+
+# From float
+let amount2 = usdc(99.50)  # 99.50 USDC = 99_500_000 base units
+```
+
+### Share Units (6 decimals)
+
+```nim
+# From integer
+let shares1 = share(50)  # 50 shares = 50_000_000 base units
+
+# From float
+let shares2 = share(10.25)  # 10.25 shares = 10_250_000 base units
+```
+
+### Gas Units
+
+```nim
+# Wei conversion
+let gasWei = wei(21000)
+
+# Gwei conversion
+let gasGwei = gwei(50)
+
+# Default gas settings
+const
+  MAX_FEE_PER_GAS = gwei(800)
+  MAX_PRIORITY_FEE_PER_GAS = gwei(25)
+```
+
+## Cryptographic Utilities
+
+### Ethereum Signatures
+
+```nim
+func ethSign(privKey: PrivateKey, msg: openArray[byte]): string
+```
+
+Signs a message using Ethereum's signature format (v + 27).
+
+**Parameters:**
+- `privKey`: Private key for signing
+- `msg`: Message bytes to sign
+
+**Returns:** Hex-encoded signature string
+
+**Example:**
+```nim
+let signature = privKey.ethSign(messageHash)
+```
+
+### Modular Square Root
+
+```nim
+func modSqrt(a: EvmUInt256, p: EvmUInt256): EvmUInt256
+```
+
+Computes modular square root using the Tonelli-Shanks algorithm. Used for BN254 curve operations in CTF position ID derivation.
+
+## Usage Example
+
+```nim
+import polycule/evm
+
+# Create amounts
+let
+  collateralAmount = usdc(100)  # 100 USDC
+  shareAmount = share(50)        # 50 shares
+
+# Work with addresses
+let exchangeAddress = CTF_EXCHANGE
+
+# Configure transaction
+let txArgs = TransactionArgs(
+  chainId: Opt.some(CHAIN_ID),
+  gas: Opt.some(Quantity(300_000)),
+  maxFeePerGas: Opt.some(MAX_FEE_PER_GAS),
+  maxPriorityFeePerGas: Opt.some(MAX_PRIORITY_FEE_PER_GAS)
+)
+```
+
+## Next Steps
+
+- [Contract Interfaces](/api/evm/contracts) - Learn about CTF, Exchange, and ERC20 contracts
+- [EIP-712 Signing](/api/evm/eip712) - Understand typed data signing for orders

@@ -1,0 +1,239 @@
+---
+title: 'Configuration'
+description: 'Configuration types for the Polycule SDK'
+---
+
+## PolyculeConfig
+
+Main configuration object for initializing the PolyculeClient.
+
+### Type Definition
+
+```nim
+PolyculeConfig = object
+  rpcUrl: Opt[Uri]
+  builderCreds: Opt[ApiKeyCreds]
+```
+
+### Fields
+
+<ParamField path="rpcUrl" type="Opt[Uri]" required>
+  RPC endpoint URL for connecting to Polygon network. This field is required and must be provided.
+  
+  Example: `Opt.some(parseUri("https://polygon-rpc.com"))`
+</ParamField>
+
+<ParamField path="builderCreds" type="Opt[ApiKeyCreds]">
+  Optional Polymarket builder API credentials for L1 operations.
+  
+  Use `Opt.none(ApiKeyCreds)` if not using builder features.
+</ParamField>
+
+### Example
+
+```nim
+import std/uri
+import pkg/stew/results
+
+let config = PolyculeConfig(
+  rpcUrl: Opt.some(parseUri("https://polygon-mainnet.infura.io/v3/YOUR_KEY")),
+  builderCreds: Opt.none(ApiKeyCreds)
+)
+```
+
+---
+
+## ContractConfig
+
+Contract addresses configuration for trading operations. Automatically selected based on market type (standard or neg-risk).
+
+### Type Definition
+
+```nim
+ContractConfig = object
+  collateral: Address
+  ctf: Address
+  exchange: Address
+```
+
+### Fields
+
+<ParamField path="collateral" type="Address" required>
+  Address of the collateral token contract (typically USDC on Polygon).
+  
+  Varies based on whether the market is a neg-risk market:
+  - Standard markets: `COLLATERAL_TOKEN`
+  - Neg-risk markets: `NEGRISK_WRAPPED_COLLATERAL_TOKEN`
+</ParamField>
+
+<ParamField path="ctf" type="Address" required>
+  Address of the Conditional Token Framework (CTF) contract.
+  
+  Varies based on market type:
+  - Standard markets: `CTF`
+  - Neg-risk markets: `NEGRISK_CTF`
+</ParamField>
+
+<ParamField path="exchange" type="Address" required>
+  Address of the exchange contract for trading.
+  
+  Varies based on market type:
+  - Standard markets: `CTF_EXCHANGE`
+  - Neg-risk markets: `NEGRISK_CTF_EXCHANGE`
+</ParamField>
+
+### Usage
+
+The `ContractConfig` is automatically determined by the SDK based on the market's neg-risk status. You typically don't need to create this manually.
+
+```nim
+# Automatically retrieved from market
+let config = market.contractConfig()
+```
+
+---
+
+## ApiKeyCreds
+
+API credentials for Polymarket L1 (Layer 1) authentication.
+
+### Type Definition
+
+```nim
+ApiKeyCreds = object
+  apiKey: Opt[string]
+  secret: Opt[string]
+  passphrase: Opt[string]
+```
+
+### Fields
+
+<ParamField path="apiKey" type="Opt[string]">
+  API key for Polymarket builder access
+</ParamField>
+
+<ParamField path="secret" type="Opt[string]">
+  API secret for request signing
+</ParamField>
+
+<ParamField path="passphrase" type="Opt[string]">
+  API passphrase for additional authentication
+</ParamField>
+
+### Example
+
+```nim
+let creds = ApiKeyCreds(
+  apiKey: Opt.some("your-api-key"),
+  secret: Opt.some("your-secret"),
+  passphrase: Opt.some("your-passphrase")
+)
+
+let config = PolyculeConfig(
+  rpcUrl: Opt.some(parseUri("https://polygon-rpc.com")),
+  builderCreds: Opt.some(creds)
+)
+```
+
+---
+
+## SignatureType
+
+Defines the type of signature scheme used for signing orders and transactions.
+
+### Type Definition
+
+```nim
+SignatureType = enum
+  EOA = 0                 # Externally Owned Account signature
+  POLY_PROXY = 1          # Polymarket Proxy signature
+  POLY_GNOSIS_SAFE = 2    # Polymarket Gnosis Safe signature
+```
+
+### Values
+
+<ParamField path="EOA" type="0">
+  Standard wallet signature (most common). Use this for regular MetaMask or hardware wallet interactions.
+</ParamField>
+
+<ParamField path="POLY_PROXY" type="1">
+  Polymarket Proxy contract signature. Used for advanced proxy wallet setups.
+</ParamField>
+
+<ParamField path="POLY_GNOSIS_SAFE" type="2">
+  Gnosis Safe multi-signature wallet support.
+</ParamField>
+
+### Example
+
+```nim
+# Using EOA (default)
+let client = await newPolycule(
+  privateKey,
+  config,
+  signatureType = SignatureType.EOA
+)
+
+# Using Polymarket Proxy
+let proxyClient = await newPolycule(
+  privateKey,
+  config,
+  signatureType = SignatureType.POLY_PROXY
+)
+```
+
+---
+
+## PostOrderOptions
+
+Options for controlling order execution behavior when posting orders.
+
+### Type Definition
+
+```nim
+PostOrderOptions = object
+  orderType: OrderType
+  postOnly: bool
+```
+
+### Fields
+
+<ParamField path="orderType" type="OrderType" default="OrderType.GTC">
+  Order execution type:
+  - `GTC` (Good Till Canceled) - Order stays active until filled or canceled
+  - `FOK` (Fill or Kill) - Order must be filled immediately and completely or canceled
+  - `FAK` (Fill and Kill) - Fill any amount immediately, cancel remainder
+  - `GTD` (Good Till Date) - Order expires at specified time
+</ParamField>
+
+<ParamField path="postOnly" type="bool" default="true">
+  If `true`, order will only add liquidity to the order book (maker only). Order will be rejected if it would immediately match existing orders.
+  
+  If `false`, order can take liquidity (match immediately with existing orders).
+</ParamField>
+
+### Example
+
+```nim
+# Post-only GTC order (default)
+let result1 = await client.buy(
+  outcomeYes = true,
+  size = Size(100.0),
+  price = Price(0.65),
+  postOrderOptions = PostOrderOptions(
+    orderType: OrderType.GTC,
+    postOnly: true
+  )
+)
+
+# Fill-or-kill order
+let result2 = await client.buy(
+  outcomeYes = true,
+  size = Size(100.0),
+  price = Price(0.65),
+  postOrderOptions = PostOrderOptions(
+    orderType: OrderType.FOK,
+    postOnly: false
+  )
+)
+```

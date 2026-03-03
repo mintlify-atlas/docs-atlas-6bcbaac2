@@ -1,0 +1,215 @@
+---
+title: "Trade Types"
+description: "Trade-related types for tracking and managing trades in the Polycule Nim SDK"
+---
+
+## TradeResponse
+
+Complete trade details from the API (with proper type conversions).
+
+<ResponseField name="id" type="string">
+  Unique trade ID
+</ResponseField>
+
+<ResponseField name="taker_order_id" type="string">
+  ID of the taker order
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Market condition ID
+</ResponseField>
+
+<ResponseField name="asset_id" type="string">
+  Asset/token ID being traded
+</ResponseField>
+
+<ResponseField name="side" type="Side">
+  Trade side (BUY or SELL)
+</ResponseField>
+
+<ResponseField name="size" type="Size">
+  Trade size (converted from string)
+</ResponseField>
+
+<ResponseField name="fee_rate_bps" type="uint32">
+  Fee rate in basis points (converted from string)
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Trade price (converted from string)
+</ResponseField>
+
+<ResponseField name="status" type="TradeExecutionStatus">
+  Trade execution status (converted from string)
+</ResponseField>
+
+<ResponseField name="match_time" type="string">
+  Match time as ISO string
+</ResponseField>
+
+<ResponseField name="last_update" type="string">
+  Last update time as ISO string
+</ResponseField>
+
+<ResponseField name="outcome" type="string">
+  Outcome name/description
+</ResponseField>
+
+<ResponseField name="bucket_index" type="int">
+  Bucket index for the trade
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  Owner address
+</ResponseField>
+
+<ResponseField name="maker_address" type="string">
+  Maker address
+</ResponseField>
+
+<ResponseField name="maker_orders" type="seq[MakerOrder]">
+  Array of maker orders involved in the trade
+</ResponseField>
+
+<ResponseField name="transaction_hash" type="string">
+  Transaction hash on blockchain
+</ResponseField>
+
+<ResponseField name="trader_side" type="TraderSide">
+  TAKER or MAKER indicating user's role in trade
+</ResponseField>
+
+## TradeMessage
+
+Trade message received via WebSocket (event_type="trade" is implicit).
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID)
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  Trade ID
+</ResponseField>
+
+<ResponseField name="last_update" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="maker_orders" type="seq[MakerOrder]">
+  Array of maker order details
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Market identifier (condition ID)
+</ResponseField>
+
+<ResponseField name="matchtime" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="outcome" type="string">
+  Outcome name/description
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  API key of event owner
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Trade price (parse to float)
+</ResponseField>
+
+<ResponseField name="side" type="Side">
+  Trade side (parse to Side enum)
+</ResponseField>
+
+<ResponseField name="size" type="Size">
+  Trade size (parse to float)
+</ResponseField>
+
+<ResponseField name="status" type="TradeStatus">
+  Trade status (parse to TradeStatus enum)
+</ResponseField>
+
+<ResponseField name="taker_order_id" type="string">
+  ID of taker order
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="trade_owner" type="string">
+  API key of trade owner
+</ResponseField>
+
+<ResponseField name="type" type="TradeMessageType">
+  "TRADE" (enum)
+</ResponseField>
+
+## MakerOrder
+
+Maker order details within a trade (nested in Trade interface) with proper type conversions.
+
+<ResponseField name="order_id" type="string">
+  Order ID of the maker order
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  Owner address of the maker order
+</ResponseField>
+
+<ResponseField name="maker_address" type="string">
+  Maker address of the order
+</ResponseField>
+
+<ResponseField name="matched_amount" type="Size">
+  Amount matched from this maker order (converted from string)
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Price of the maker order (converted from string)
+</ResponseField>
+
+<ResponseField name="fee_rate_bps" type="uint32">
+  Fee rate in basis points (converted from string)
+</ResponseField>
+
+<ResponseField name="asset_id" type="string">
+  Asset ID being traded
+</ResponseField>
+
+<ResponseField name="outcome" type="string">
+  Outcome name/description
+</ResponseField>
+
+<ResponseField name="side" type="Side" required>
+  Side of the maker order (BUY or SELL)
+</ResponseField>
+
+## TradeStatus
+
+Trade status for tracking trade execution.
+
+- `MATCHED` - Trade matched and sent to executor (non-terminal)
+- `MINED` - Trade mined into chain, no finality threshold (non-terminal)
+- `CONFIRMED` - Trade achieved finality and was successful (terminal)
+- `RETRYING` - Trade failed and is being retried (non-terminal)
+- `FAILED` - Trade has failed and won't be retried (terminal)
+
+## TradeExecutionStatus
+
+Trade execution status.
+
+- `MATCHED` - Trade matched and sent to executor (non-terminal)
+- `MINED` - Trade mined into chain, no finality threshold (non-terminal)
+- `CONFIRMED` - Trade achieved finality and was successful (terminal)
+- `RETRYING` - Trade failed and is being retried (non-terminal)
+- `FAILED` - Trade has failed and won't be retried (terminal)
+
+## TraderSide
+
+TraderSide enum for indicating role in trade.
+
+- `TAKER` - User was the taker in the trade
+- `MAKER` - User was the maker in the trade

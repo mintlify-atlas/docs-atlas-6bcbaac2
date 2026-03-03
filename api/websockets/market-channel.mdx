@@ -1,0 +1,355 @@
+---
+title: "MarketWss"
+description: "Real-time market data WebSocket channel for order books, prices, and market events"
+---
+
+## Overview
+
+The `MarketWss` channel provides real-time updates for market data including order books, price changes, best bid/ask spreads, and market lifecycle events. Subscribe to specific asset IDs to receive live market updates.
+
+## Connection
+
+### Connect to Market Channel
+
+Establish a WebSocket connection to the market data feed:
+
+```nim
+import polycule
+
+let marketWs = await MarketWss.connect(
+    assetIds = ["asset-id-1", "asset-id-2"].toHashSet(),
+    customFeatures = false,
+    config = WsConfig(
+        pingInterval: 500.millis,
+        livenessTimeout: 1.minutes,
+        shouldReconnect: true
+    )
+)
+```
+
+**Parameters:**
+- `assetIds`: Set of asset IDs to subscribe to (can be empty)
+- `customFeatures`: Enable custom features like `onNewMarket` and `onMarketResolved` handlers
+- `config`: WebSocket configuration for ping interval, timeout, and auto-reconnect
+- `postConnectHook`: Optional callback executed after initial connection
+- `postReconnectHook`: Optional callback executed after reconnection
+- `onClose`: Optional callback for connection close events
+
+**Returns:** `Future[MarketWss]` - Connected market WebSocket instance
+
+**Reference:** `websockets.nim:285-339`
+
+## Subscription Management
+
+### Subscribe to Assets
+
+Add asset IDs to receive market data updates:
+
+```nim
+await marketWs.subscribe(["new-asset-id"].toHashSet())
+```
+
+Only new assets (not already subscribed) will trigger a subscription message.
+
+**Reference:** `wss/market_channel.nim:49-61`
+
+### Unsubscribe from Assets
+
+Remove asset IDs from your subscription:
+
+```nim
+await marketWs.unsubscribe(["asset-id-to-remove"].toHashSet())
+```
+
+**Reference:** `wss/market_channel.nim:63-75`
+
+## Message Handlers
+
+Attach async callback functions to handle different market event types.
+
+### Order Book Updates
+
+Receive full order book snapshots:
+
+```nim
+proc onBook(msg: BookMessage) {.async, gcsafe.} =
+    echo "Book | ",
+        msg.asset_id.get("?"),
+        " | bids: ",
+        msg.bids.get(@[]).len,
+        " asks: ",
+        msg.asks.get(@[]).len
+
+marketWs.onBook = onBook
+```
+
+**Message Fields:**
+- `asset_id`: Asset/token identifier
+- `market`: Market condition ID
+- `timestamp`: Unix timestamp of snapshot
+- `hash`: Order book hash for verification
+- `bids`: Array of bid order summaries (price/size)
+- `asks`: Array of ask order summaries (price/size)
+- `last_trade_price`: Most recent trade price
+
+**Reference:** `wss/market_channel.nim:7-8`, `global.nim:396-406`
+
+### Price Changes
+
+Receive incremental price updates when orders are added/removed:
+
+```nim
+proc onPriceChange(msg: PriceChangeMessage) {.async, gcsafe.} =
+    echo "PriceChange | ",
+        msg.market.get("?"),
+        " | ",
+        msg.price_changes.get(@[]).len,
+        " changes"
+
+marketWs.onPriceChange = onPriceChange
+```
+
+**Message Fields:**
+- `market`: Market condition ID
+- `price_changes`: Array of price change objects
+  - `asset_id`: Asset identifier
+  - `price`: New price level
+  - `size`: Size at price level
+  - `side`: BUY or SELL
+  - `hash`: Order hash
+  - `best_bid`: Current best bid
+  - `best_ask`: Current best ask
+- `timestamp`: Unix timestamp
+
+**Reference:** `wss/market_channel.nim:10-13`, `global.nim:408-422`
+
+### Best Bid/Ask Spread
+
+Track the top of the order book:
+
+```nim
+proc onBestBidAsk(msg: BestBidAskMessage) {.async, gcsafe.} =
+    echo "BestBidAsk | ",
+        msg.best_ask.get(Price(0.0)),
+        " / ",
+        msg.best_bid.get(Price(0.0))
+
+marketWs.onBestBidAsk = onBestBidAsk
+```
+
+**Message Fields:**
+- `market`: Market condition ID
+- `asset_id`: Asset identifier
+- `best_ask`: Current best ask price
+- `best_bid`: Current best bid price
+- `spread`: Bid-ask spread
+- `timestamp`: Unix timestamp
+
+**Reference:** `wss/market_channel.nim:25-28`, `global.nim:446-453`
+
+### Last Trade Price
+
+Receive the most recent executed trade:
+
+```nim
+proc onLastTradePrice(msg: LastTradePriceMessage) {.async, gcsafe.} =
+    echo "LastTrade | ",
+        msg.side.get(BUY),
+        " ",
+        msg.size.get(Size(0.0)),
+        " @ ",
+        msg.price.get(Price(0.0))
+
+marketWs.onLastTradePrice = onLastTradePrice
+```
+
+**Message Fields:**
+- `asset_id`: Asset identifier
+- `market`: Market condition ID
+- `price`: Trade price
+- `size`: Trade size
+- `side`: BUY or SELL
+- `fee_rate_bps`: Fee rate in basis points
+- `transaction_hash`: Blockchain transaction hash
+- `timestamp`: Unix timestamp
+
+**Reference:** `wss/market_channel.nim:20-23`, `global.nim:435-444`
+
+### Tick Size Changes
+
+Receive notifications when tick size changes for an asset:
+
+```nim
+proc onTickSizeChange(msg: TickSizeChangeMessage) {.async, gcsafe.} =
+    echo "TickSize | ",
+        msg.asset_id.get("?"),
+        " | ",
+        msg.old_tick_size.get(TICK_0_01),
+        " -> ",
+        msg.new_tick_size.get(TICK_0_01)
+
+marketWs.onTickSizeChange = onTickSizeChange
+```
+
+**Message Fields:**
+- `asset_id`: Asset identifier
+- `market`: Market condition ID
+- `old_tick_size`: Previous tick size (TICK_0_1, TICK_0_01, TICK_0_001, TICK_0_0001)
+- `new_tick_size`: New tick size
+- `timestamp`: Unix timestamp
+
+**Reference:** `wss/market_channel.nim:15-18`, `global.nim:424-433`
+
+## Custom Features
+
+Enable custom features to receive market lifecycle events. Must set `customFeatures = true` when connecting.
+
+### New Market Events
+
+Receive notifications when new markets are created:
+
+```nim
+proc onNewMarket(msg: NewMarketMessage) {.async, gcsafe.} =
+    echo "NewMarket | ", msg.slug.get("?")
+
+marketWs.onNewMarket = onNewMarket
+```
+
+**Message Fields:**
+- `id`: Market ID
+- `question`: Market question
+- `market`: Market condition ID
+- `slug`: Market slug
+- `description`: Market description
+- `assets_ids`: Array of asset IDs
+- `outcomes`: Array of outcome names
+- `event_message`: Event metadata object
+- `timestamp`: Unix timestamp
+- `tags`: Array of tags
+
+**Reference:** `wss/market_channel.nim:30-37`, `global.nim:463-474`
+
+### Market Resolution Events
+
+Receive notifications when markets are resolved:
+
+```nim
+proc onMarketResolved(msg: MarketResolvedMessage) {.async, gcsafe.} =
+    echo "Resolved | ",
+        msg.market.get("?"),
+        " winner: ",
+        msg.winning_outcome.get("?")
+
+marketWs.onMarketResolved = onMarketResolved
+```
+
+**Message Fields:**
+- `id`: Market ID
+- `market`: Market condition ID
+- `assets_ids`: Array of asset IDs
+- `winning_asset_id`: ID of winning asset
+- `winning_outcome`: Name of winning outcome
+- `event_message`: Event metadata object
+- `timestamp`: Unix timestamp
+- `tags`: Array of tags
+
+**Reference:** `wss/market_channel.nim:39-47`, `global.nim:476-492`
+
+## Error Handling
+
+Handle WebSocket errors and message parsing failures:
+
+```nim
+proc onError(msg: string, err: ref CatchableError) {.async, gcsafe.} =
+    echo "WebSocket Error: ", err.msg
+    echo "Raw message: ", msg
+
+marketWs.onError = onError
+```
+
+**Reference:** `websockets.nim:450-453`
+
+## Message Routing
+
+Messages are automatically routed to the appropriate handler based on the `event_type` field. The routing logic is handled internally:
+
+- `book` → `onBook`
+- `price_change` → `onPriceChange`
+- `tick_size_change` → `onTickSizeChange`
+- `last_trade_price` → `onLastTradePrice`
+- `best_bid_ask` → `onBestBidAsk`
+- `new_market` → `onNewMarket` (requires `customFeatures = true`)
+- `market_resolved` → `onMarketResolved` (requires `customFeatures = true`)
+
+**Reference:** `websockets.nim:8-45`
+
+## Connection Management
+
+### Auto-Reconnect
+
+The WebSocket automatically reconnects on connection loss if `shouldReconnect = true`:
+
+- Monitors connection liveness via ping/pong
+- Detects timeouts based on `livenessTimeout`
+- Automatically resubscribes to all assets after reconnect
+- Executes `postReconnectHook` if configured
+
+**Reference:** `websockets.nim:84-104`, `websockets.nim:152-186`
+
+### Shutdown
+
+Gracefully close the WebSocket connection:
+
+```nim
+await marketWs.shutDown()
+```
+
+Disables auto-reconnect and closes the connection.
+
+**Reference:** `websockets.nim:455-459`
+
+## Complete Example
+
+```nim
+import std/[os, uri]
+import polycule
+
+proc main() {.async.} =
+    let
+        RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+        PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+        client = await newPolycule(
+            PRIVATE_KEY, EOA, PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+        )
+
+    # Define message handlers
+    proc onBook(msg: BookMessage) {.async, gcsafe.} =
+        echo "Book | ",
+            msg.asset_id.get("?"),
+            " | bids: ",
+            msg.bids.get(@[]).len,
+            " asks: ",
+            msg.asks.get(@[]).len
+
+    proc onBestBidAsk(msg: BestBidAskMessage) {.async, gcsafe.} =
+        echo "BestBidAsk | ",
+            msg.best_ask.get(Price(0.0)),
+            " / ",
+            msg.best_bid.get(Price(0.0))
+
+    # Connect and set up handlers
+    var marketSlug = getCryptoCurrentMarketSlug("btc", MINUTE15)
+    await client.setMarket(marketSlug)
+    client.onBestBidAsk = onBestBidAsk
+    await client.listenToMarketWss()
+
+    # Keep running
+    while true:
+        await sleepAsync(5.seconds)
+
+when isMainModule:
+    waitFor main()
+    runForever()
+```
+
+**Reference:** `examples/log_prices.nim:33-77`

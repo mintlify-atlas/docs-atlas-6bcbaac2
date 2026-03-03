@@ -1,0 +1,615 @@
+---
+title: "L2 Methods"
+description: "Authenticated trading operations for the CLOB"
+---
+
+L2 methods handle authenticated trading operations using HMAC-SHA256 signatures. These methods require active API credentials obtained through L1 authentication.
+
+## Order Management
+
+### postOrder
+
+Post a pre-signed order to the CLOB.
+
+```nim
+proc postOrder(
+  client: PolyculeClient,
+  signedOrder: SignedOrder,
+  postOptions: PostOrderOptions = PostOrderOptions(),
+  deferExec: bool = false
+): Future[Result[OrderResponse, string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="signedOrder" type="SignedOrder" required>
+  The signed order to post (created via `createOrder`)
+</ParamField>
+
+<ParamField path="postOptions" type="PostOrderOptions">
+  Order posting options (order type, post-only flag)
+</ParamField>
+
+<ParamField path="deferExec" type="bool">
+  Whether to defer order execution (default: false)
+</ParamField>
+
+**Returns:** `Future[Result[OrderResponse, string]]` - Order response with ID and status, or error
+
+**Example:**
+```nim
+let signedOrder = client.createOrder(order, options).get()
+
+let postOptions = PostOrderOptions(
+  orderType: GTC,
+  postOnly: false
+)
+
+let result = await client.postOrder(signedOrder, postOptions)
+
+if result.isOk():
+  echo "Order ID: ", result.value().orderID.get()
+  echo "Status: ", result.value().status.get()
+else:
+  echo "Error: ", result.error()
+```
+
+**Note:** `postOnly` is only supported for GTC and GTD order types.
+
+---
+
+### createAndPostOrder
+
+Create and post an order in a single operation.
+
+```nim
+proc createAndPostOrder(
+  client: PolyculeClient,
+  order: UserOrder,
+  options: CreateOrderOptions,
+  postOptions: PostOrderOptions = PostOrderOptions(),
+  deferExec: bool = false
+): Future[Result[OrderResponse, string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="order" type="UserOrder" required>
+  The order parameters
+</ParamField>
+
+<ParamField path="options" type="CreateOrderOptions" required>
+  Order creation options (tick size, negative risk)
+</ParamField>
+
+<ParamField path="postOptions" type="PostOrderOptions">
+  Order posting options (order type, post-only flag)
+</ParamField>
+
+<ParamField path="deferExec" type="bool">
+  Whether to defer order execution (default: false)
+</ParamField>
+
+**Returns:** `Future[Result[OrderResponse, string]]` - Order response with ID and status, or error
+
+**Example:**
+```nim
+let order = UserOrder(
+  tokenID: "123456",
+  price: Price(0.65),
+  size: Size(10.0),
+  side: BUY
+)
+
+let options = CreateOrderOptions(
+  tickSize: TICK_0_01,
+  negRisk: false
+)
+
+let postOptions = PostOrderOptions(
+  orderType: GTC,
+  postOnly: true  # Only add liquidity, don't take
+)
+
+let result = await client.createAndPostOrder(order, options, postOptions)
+```
+
+---
+
+### postOrders
+
+Post multiple pre-signed orders to the CLOB (batch operation).
+
+```nim
+proc postOrders(
+  client: PolyculeClient,
+  signedOrders: seq[SignedOrder],
+  options: PostOrderOptions = PostOrderOptions()
+): Future[Result[seq[OrderResponse], string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="signedOrders" type="seq[SignedOrder]" required>
+  Sequence of signed orders to post (max 15)
+</ParamField>
+
+<ParamField path="options" type="PostOrderOptions">
+  Order posting options applied to all orders
+</ParamField>
+
+**Returns:** `Future[Result[seq[OrderResponse], string]]` - Sequence of order responses, or error
+
+**Example:**
+```nim
+var signedOrders: seq[SignedOrder]
+for order in userOrders:
+  let signed = client.createOrder(order, options)
+  if signed.isSome():
+    signedOrders.add(signed.get())
+
+let result = await client.postOrders(signedOrders)
+
+if result.isOk():
+  for orderResponse in result.value():
+    echo "Order ID: ", orderResponse.orderID.get()
+```
+
+**Limit:** Maximum 15 orders per batch request.
+
+---
+
+### getOrder
+
+Get details for a specific order by ID.
+
+```nim
+proc getOrder(
+  client: PolyculeClient,
+  orderId: string
+): Future[Result[OpenOrderResponse, string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="orderId" type="string" required>
+  The unique order ID to retrieve
+</ParamField>
+
+**Returns:** `Future[Result[OpenOrderResponse, string]]` - Order details, or error
+
+**Example:**
+```nim
+let result = await client.getOrder("0x123abc...")
+
+if result.isOk():
+  let order = result.value()
+  echo "Status: ", order.status.get()
+  echo "Side: ", order.side.get()
+  echo "Price: ", order.price.get()
+  echo "Original Size: ", order.original_size.get()
+  echo "Size Matched: ", order.size_matched.get()
+```
+
+---
+
+### getOpenOrders
+
+Get all open orders for the authenticated user.
+
+```nim
+proc getOpenOrders(
+  client: PolyculeClient,
+  params: OpenOrderParams = OpenOrderParams()
+): Future[Result[OpenOrdersResponse, string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="params" type="OpenOrderParams">
+  Optional filters for order retrieval
+</ParamField>
+
+**Returns:** `Future[Result[OpenOrdersResponse, string]]` - Paginated open orders, or error
+
+**Example:**
+```nim
+# Get all open orders
+let result = await client.getOpenOrders()
+
+if result.isOk():
+  let response = result.value()
+  echo "Total Orders: ", response.count.get()
+  
+  for order in response.data.get():
+    echo "Order ID: ", order.id.get()
+    echo "Side: ", order.side.get()
+    echo "Price: ", order.price.get()
+
+# Filter by market
+let params = OpenOrderParams(
+  market: Opt.some("0xabc123..."),
+  asset_id: Opt.some("456789")
+)
+
+let filtered = await client.getOpenOrders(params)
+```
+
+---
+
+### cancelOrder
+
+Cancel a specific order by ID.
+
+```nim
+proc cancelOrder(
+  client: PolyculeClient,
+  orderId: string
+): Future[Result[CancelOrdersResponse, string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="orderId" type="string" required>
+  The unique order ID to cancel
+</ParamField>
+
+**Returns:** `Future[Result[CancelOrdersResponse, string]]` - Cancellation response, or error
+
+**Example:**
+```nim
+let result = await client.cancelOrder("0x123abc...")
+
+if result.isOk():
+  let response = result.value()
+  if response.canceled.get().len > 0:
+    echo "Successfully canceled: ", response.canceled.get()[0]
+  
+  if response.not_canceled.get().len > 0:
+    for (orderId, reason) in response.not_canceled.get():
+      echo "Failed to cancel ", orderId, ": ", reason
+```
+
+---
+
+### cancelAll
+
+Cancel multiple orders by ID, or all open orders if no IDs provided.
+
+```nim
+proc cancelAll(
+  client: PolyculeClient,
+  orderIds: seq[string] = @[]
+): Future[Result[CancelOrdersResponse, string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="orderIds" type="seq[string]">
+  Sequence of order IDs to cancel. Empty sequence cancels all open orders.
+</ParamField>
+
+**Returns:** `Future[Result[CancelOrdersResponse, string]]` - Cancellation response, or error
+
+**Example:**
+```nim
+# Cancel specific orders
+let orderIds = @["0x123abc...", "0x456def..."]
+let result = await client.cancelAll(orderIds)
+
+# Cancel ALL open orders
+let cancelAllResult = await client.cancelAll()
+
+if cancelAllResult.isOk():
+  echo "Canceled ", cancelAllResult.value().canceled.get().len, " orders"
+```
+
+---
+
+## Trade History
+
+### getTrades
+
+Get trade history for the authenticated user.
+
+```nim
+proc getTrades(
+  client: PolyculeClient,
+  params: TradeParams = TradeParams()
+): Future[Result[seq[TradeResponse], string]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="params" type="TradeParams">
+  Optional filters for trade retrieval
+</ParamField>
+
+**Returns:** `Future[Result[seq[TradeResponse], string]]` - Sequence of trades, or error
+
+**Example:**
+```nim
+# Get all trades
+let result = await client.getTrades()
+
+if result.isOk():
+  for trade in result.value():
+    echo "Trade ID: ", trade.id.get()
+    echo "Side: ", trade.side.get()
+    echo "Size: ", trade.size.get()
+    echo "Price: ", trade.price.get()
+    echo "Status: ", trade.status.get()
+
+# Filter by market and asset
+let params = TradeParams(
+  market: Opt.some("0xabc123..."),
+  asset_id: Opt.some("456789"),
+  before: Opt.some("cursor_string"),
+  after: Opt.some("cursor_string")
+)
+
+let filtered = await client.getTrades(params)
+```
+
+---
+
+## Helper Methods
+
+### createL2Headers
+
+Create HMAC-authenticated headers for L2 API requests.
+
+```nim
+proc createL2Headers(
+  client: PolyculeClient,
+  httpMethod: string,
+  requestUrl: Uri,
+  body: string = ""
+): Future[Opt[HttpTable]] {.async.}
+```
+
+<ParamField path="client" type="PolyculeClient" required>
+  The authenticated Polycule client instance
+</ParamField>
+
+<ParamField path="httpMethod" type="string" required>
+  HTTP method (GET, POST, DELETE)
+</ParamField>
+
+<ParamField path="requestUrl" type="Uri" required>
+  Request URL including path and query parameters
+</ParamField>
+
+<ParamField path="body" type="string">
+  Request body as JSON string (for POST/DELETE)
+</ParamField>
+
+**Returns:** `Future[Opt[HttpTable]]` - HTTP headers with HMAC signature
+
+**Example:**
+```nim
+let url = parseUri("https://clob.polymarket.com/orders")
+let headers = await client.createL2Headers("GET", url)
+
+if headers.isSome():
+  # Use headers for authenticated request
+  let httpClient = newHttpClient(headers.get())
+```
+
+**Note:** This is typically used internally by other L2 methods.
+
+---
+
+### buildHmacSignature
+
+Build HMAC-SHA256 signature for L2 authentication.
+
+```nim
+proc buildHmacSignature(
+  secret: string,
+  timestamp: Timestamp,
+  httpMethod: string,
+  requestPath: string,
+  body: string = ""
+): string
+```
+
+<ParamField path="secret" type="string" required>
+  Base64-encoded API secret
+</ParamField>
+
+<ParamField path="timestamp" type="Timestamp" required>
+  Server timestamp for the request
+</ParamField>
+
+<ParamField path="httpMethod" type="string" required>
+  HTTP method (GET, POST, DELETE)
+</ParamField>
+
+<ParamField path="requestPath" type="string" required>
+  Request path including query parameters
+</ParamField>
+
+<ParamField path="body" type="string">
+  Request body as JSON string
+</ParamField>
+
+**Returns:** `string` - URL-safe base64-encoded HMAC signature
+
+**Example:**
+```nim
+let secret = client.user.value().wallet.auth.value().secret.get()
+let timestamp = (await getServerTimestamp()).get()
+let signature = buildHmacSignature(
+  secret,
+  timestamp,
+  "POST",
+  "/orders",
+  "{\"order\":...}"
+)
+```
+
+**Message Format:** `timestamp + method + requestPath + body`
+
+---
+
+## Types
+
+### PostOrderOptions
+
+```nim
+type PostOrderOptions = object
+  orderType: OrderType  # GTC, FOK, FAK, or GTD
+  postOnly: bool        # Post-only flag (only for GTC/GTD)
+```
+
+### OrderResponse
+
+```nim
+type OrderResponse = object
+  success: Opt[bool]
+  errorMsg: Opt[OrderErrorMessage]
+  orderID: Opt[string]
+  transactionsHashes: Opt[seq[string]]
+  status: Opt[OrderInsertStatus]  # MATCHED, LIVE, DELAYED, UNMATCHED
+  takingAmount: Opt[Size]
+  makingAmount: Opt[Size]
+```
+
+### OpenOrderParams
+
+```nim
+type OpenOrderParams = object
+  id: Opt[string]        # Filter by order ID
+  market: Opt[string]    # Filter by market ID
+  asset_id: Opt[string]  # Filter by asset ID
+```
+
+### OpenOrderResponse
+
+```nim
+type OpenOrderResponse = object
+  id: Opt[string]
+  status: Opt[OrderStatus]  # LIVE, OPEN, FILLED, CANCELED, PARTIALLY_FILLED
+  owner: Opt[string]
+  maker_address: Opt[string]
+  market: Opt[string]
+  asset_id: Opt[string]
+  side: Opt[Side]
+  original_size: Opt[Size]
+  size_matched: Opt[Size]
+  price: Opt[Price]
+  associate_trades: Opt[seq[string]]
+  outcome: Opt[string]
+  created_at: Opt[Timestamp]
+  expiration: Opt[Timestamp]
+  order_type: Opt[OrderType]
+```
+
+### OpenOrdersResponse
+
+```nim
+type OpenOrdersResponse = object
+  data: Opt[seq[OpenOrderResponse]]
+  next_cursor: Opt[string]
+  limit: Opt[int]
+  count: Opt[int]
+```
+
+### CancelOrdersResponse
+
+```nim
+type CancelOrdersResponse = object
+  canceled: Opt[seq[string]]
+  not_canceled: Opt[seq[(string, string)]]  # (orderID, reason)
+```
+
+### TradeParams
+
+```nim
+type TradeParams = object
+  id: Opt[string]
+  maker_address: Opt[string]
+  market: Opt[string]
+  asset_id: Opt[string]
+  before: Opt[string]  # Pagination cursor
+  after: Opt[string]   # Pagination cursor
+```
+
+### TradeResponse
+
+```nim
+type TradeResponse = object
+  id: Opt[string]
+  taker_order_id: Opt[string]
+  market: Opt[string]
+  asset_id: Opt[string]
+  side: Opt[Side]
+  size: Opt[Size]
+  fee_rate_bps: Opt[uint32]
+  price: Opt[Price]
+  status: Opt[TradeExecutionStatus]  # MATCHED, MINED, CONFIRMED, RETRYING, FAILED
+  match_time: Opt[string]
+  last_update: Opt[string]
+  outcome: Opt[string]
+  bucket_index: Opt[int]
+  owner: Opt[string]
+  maker_address: Opt[string]
+  maker_orders: Opt[seq[MakerOrder]]
+  transaction_hash: Opt[string]
+  trader_side: Opt[TraderSide]  # TAKER or MAKER
+```
+
+## Order Types
+
+- **GTC** (Good Till Canceled): Order remains active until filled or manually canceled
+- **FOK** (Fill or Kill): Order must be filled completely and immediately, or canceled
+- **FAK** (Fill and Kill): Fill any amount immediately, cancel remainder
+- **GTD** (Good Till Date): Order expires at specified timestamp
+
+## Order Status
+
+- **LIVE**: Order is active on the book
+- **OPEN**: Order is open (similar to LIVE)
+- **FILLED**: Order has been completely filled
+- **CANCELED**: Order has been canceled
+- **PARTIALLY_FILLED**: Order has been partially filled
+
+## Trade Execution Status
+
+- **MATCHED**: Trade matched and sent to executor (non-terminal)
+- **MINED**: Trade mined into chain, no finality threshold (non-terminal)
+- **CONFIRMED**: Trade achieved finality and was successful (terminal)
+- **RETRYING**: Trade failed and is being retried (non-terminal)
+- **FAILED**: Trade has failed and won't be retried (terminal)
+
+## Best Practices
+
+1. **Authenticate First**: Ensure you have valid API credentials from L1 methods
+2. **Handle Results**: Always check if `Result` is `Ok` before accessing values
+3. **Batch Operations**: Use `postOrders` to submit multiple orders efficiently (max 15)
+4. **Post-Only Orders**: Use for maker-only strategies to avoid taking liquidity
+5. **Monitor Status**: Check order and trade status to track execution
+6. **Error Handling**: Parse `errorMsg` from `OrderResponse` for detailed error information
+
+## Related
+
+- [L1 Methods](/api/clob/l1-methods) - Authentication and order signing
+- [Public Methods](/api/clob/public-methods) - Market data without authentication
+- [CLOB Overview](/api/clob/overview) - Module introduction

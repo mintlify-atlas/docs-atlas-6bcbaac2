@@ -1,0 +1,316 @@
+---
+title: "UserWss"
+description: "Authenticated WebSocket channel for user-specific order and trade events"
+---
+
+## Overview
+
+The `UserWss` channel provides real-time updates for user-specific events including order placements, updates, cancellations, and trade executions. This channel requires API key authentication.
+
+## Connection
+
+### Connect to User Channel
+
+Establish an authenticated WebSocket connection for user events:
+
+```nim
+import polycule
+
+let
+    creds = ApiKeyCreds(
+        apiKey: Opt.some("your-api-key"),
+        secret: Opt.some("your-secret"),
+        passphrase: Opt.some("your-passphrase")
+    )
+    userWs = await UserWss.connect(
+        marketIds = ["market-id-1", "market-id-2"].toHashSet(),
+        creds = creds,
+        customFeatures = false,
+        config = WsConfig(
+            pingInterval: 500.millis,
+            livenessTimeout: 1.minutes,
+            shouldReconnect: true
+        )
+    )
+```
+
+**Parameters:**
+- `marketIds`: Set of market IDs to subscribe to (can be empty)
+- `creds`: API key credentials for authentication (required)
+  - `apiKey`: Your Polymarket API key
+  - `secret`: API secret
+  - `passphrase`: API passphrase
+- `customFeatures`: Enable custom features (reserved for future use)
+- `config`: WebSocket configuration for ping interval, timeout, and auto-reconnect
+- `postConnectHook`: Optional callback executed after initial connection
+- `postReconnectHook`: Optional callback executed after reconnection
+- `onClose`: Optional callback for connection close events
+
+**Returns:** `Future[UserWss]` - Connected user WebSocket instance
+
+**Reference:** `websockets.nim:341-401`
+
+## Subscription Management
+
+### Subscribe to Markets
+
+Add market IDs to receive user event updates:
+
+```nim
+await userWs.subscribe(["new-market-id"].toHashSet())
+```
+
+Only new markets (not already subscribed) will trigger a subscription message.
+
+**Reference:** `wss/user_channel.nim:13-25`
+
+### Unsubscribe from Markets
+
+Remove market IDs from your subscription:
+
+```nim
+await userWs.unsubscribe(["market-id-to-remove"].toHashSet())
+```
+
+**Reference:** `wss/user_channel.nim:28-40`
+
+## Message Handlers
+
+Attach async callback functions to handle different user event types.
+
+### Trade Events
+
+Receive notifications when your orders are executed:
+
+```nim
+proc onTrade(msg: TradeMessage) {.async, gcsafe.} =
+    echo "Trade | ",
+        msg.side.get(BUY),
+        " ",
+        msg.size.get(Size(0.0)),
+        " @ ",
+        msg.price.get(Price(0.0)),
+        " | ",
+        msg.status.get(MATCHED)
+
+userWs.onTrade = onTrade
+```
+
+**Message Fields:**
+- `id`: Trade ID
+- `asset_id`: Asset identifier
+- `market`: Market condition ID
+- `outcome`: Outcome name/description
+- `side`: BUY or SELL
+- `price`: Trade execution price
+- `size`: Trade size
+- `status`: Trade execution status (MATCHED, MINED, CONFIRMED, RETRYING, FAILED)
+- `owner`: API key of event owner
+- `trade_owner`: API key of trade owner
+- `taker_order_id`: ID of the taker order
+- `maker_orders`: Array of maker order details involved in the trade
+- `timestamp`: Trade timestamp (Unix timestamp)
+- `matchtime`: When the trade was matched
+- `last_update`: Last status update timestamp
+- `type`: Message type (TRADE)
+
+**Trade Status Values:**
+- `MATCHED`: Trade matched and sent to executor (non-terminal)
+- `MINED`: Trade mined into chain, no finality threshold (non-terminal)
+- `CONFIRMED`: Trade achieved finality and was successful (terminal)
+- `RETRYING`: Trade failed and is being retried (non-terminal)
+- `FAILED`: Trade has failed and won't be retried (terminal)
+
+**Reference:** `wss/user_channel.nim:7-8`, `global.nim:377-394`
+
+### Order Events
+
+Receive notifications for order lifecycle events (placement, updates, cancellations):
+
+```nim
+proc onOrder(msg: OrderMessage) {.async, gcsafe.} =
+    echo "Order | ",
+        msg.`type`.get(PLACEMENT_EVENT),
+        " ",
+        msg.side.get(BUY),
+        " ",
+        msg.original_size.get(Size(0.0)),
+        " @ ",
+        msg.price.get(Price(0.0))
+
+userWs.onOrder = onOrder
+```
+
+**Message Fields:**
+- `id`: Order ID
+- `asset_id`: Asset/token identifier
+- `market`: Market condition ID
+- `outcome`: Outcome name/description
+- `owner`: Order owner address
+- `order_owner`: Owner of the order
+- `side`: BUY or SELL
+- `price`: Order price
+- `original_size`: Original order size
+- `size_matched`: Amount already matched
+- `timestamp`: Event timestamp (Unix timestamp)
+- `type`: Order event type (PLACEMENT_EVENT, UPDATE_EVENT, CANCELLATION_EVENT)
+- `associate_trades`: Array of trade IDs associated with this order
+
+**Order Event Types:**
+- `PLACEMENT_EVENT`: Order was placed on the order book
+- `UPDATE_EVENT`: Order was updated (e.g., partially filled)
+- `CANCELLATION_EVENT`: Order was canceled
+
+**Reference:** `wss/user_channel.nim:10-11`, `global.nim:360-375`
+
+## Error Handling
+
+Handle WebSocket errors and message parsing failures:
+
+```nim
+proc onError(msg: string, err: ref CatchableError) {.async, gcsafe.} =
+    echo "WebSocket Error: ", err.msg
+    echo "Raw message: ", msg
+
+userWs.onError = onError
+```
+
+**Reference:** `websockets.nim:450-453`
+
+## Message Routing
+
+Messages are automatically routed to the appropriate handler based on the `event_type` field:
+
+- `trade` → `onTrade`
+- `order` → `onOrder`
+
+**Reference:** `websockets.nim:47-62`
+
+## Connection Management
+
+### Auto-Reconnect
+
+The WebSocket automatically reconnects on connection loss if `shouldReconnect = true`:
+
+- Monitors connection liveness via ping/pong
+- Detects timeouts based on `livenessTimeout`
+- Automatically resubscribes to all markets after reconnect
+- Executes `postReconnectHook` if configured
+
+**Reference:** `websockets.nim:106-126`, `websockets.nim:152-186`
+
+### Shutdown
+
+Gracefully close the WebSocket connection:
+
+```nim
+await userWs.shutDown()
+```
+
+Disables auto-reconnect and closes the connection.
+
+**Reference:** `websockets.nim:461-465`
+
+## Authentication
+
+The user channel requires API key authentication. The credentials are sent in the initial subscription message:
+
+```json
+{
+  "type": "user",
+  "markets": ["market-id-1", "market-id-2"],
+  "custom_feature_enabled": false,
+  "auth": {
+    "apiKey": "your-api-key",
+    "secret": "your-secret",
+    "passphrase": "your-passphrase"
+  }
+}
+```
+
+**Reference:** `websockets.nim:376-388`
+
+## Complete Example
+
+```nim
+import std/[os, uri]
+import polycule
+
+proc main() {.async.} =
+    let
+        RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+        PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+        client = await newPolycule(
+            PRIVATE_KEY, EOA, PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+        )
+
+    # Define message handlers
+    proc onTrade(msg: TradeMessage) {.async, gcsafe.} =
+        echo "Trade | ",
+            msg.side.get(BUY),
+            " ",
+            msg.size.get(Size(0.0)),
+            " @ ",
+            msg.price.get(Price(0.0)),
+            " | ",
+            msg.status.get(MATCHED)
+
+    proc onOrder(msg: OrderMessage) {.async, gcsafe.} =
+        echo "Order | ",
+            msg.`type`.get(PLACEMENT_EVENT),
+            " ",
+            msg.side.get(BUY),
+            " ",
+            msg.original_size.get(Size(0.0)),
+            " @ ",
+            msg.price.get(Price(0.0))
+
+    # Set up handlers and connect
+    client.onTrade = onTrade
+    client.onOrder = onOrder
+    await client.listenToUserWss()
+
+    # Keep running
+    while true:
+        await sleepAsync(5.seconds)
+
+when isMainModule:
+    waitFor main()
+    runForever()
+```
+
+**Reference:** `examples/log_prices.nim:79-102`
+
+## Use Cases
+
+### Track Order Fills
+
+Monitor when your orders get filled:
+
+```nim
+proc onTrade(msg: TradeMessage) {.async, gcsafe.} =
+    if msg.status.get(MATCHED) == CONFIRMED:
+        echo "Order filled! ",
+            msg.size.get(Size(0.0)),
+            " @ ",
+            msg.price.get(Price(0.0))
+
+userWs.onTrade = onTrade
+```
+
+### Monitor Order Status
+
+Track order lifecycle from placement to cancellation:
+
+```nim
+proc onOrder(msg: OrderMessage) {.async, gcsafe.} =
+    case msg.`type`.get(PLACEMENT_EVENT)
+    of PLACEMENT_EVENT:
+        echo "Order placed: ", msg.id.get("?")
+    of UPDATE_EVENT:
+        echo "Order updated: ", msg.size_matched.get(Size(0.0)), " matched"
+    of CANCELLATION_EVENT:
+        echo "Order canceled: ", msg.id.get("?")
+
+userWs.onOrder = onOrder
+```

@@ -1,0 +1,235 @@
+---
+title: "Order Types"
+description: "Order-related types for creating and managing orders in the Polycule Nim SDK"
+---
+
+## UserOrder
+
+Simplified user order interface for creating orders.
+
+<ResponseField name="tokenID" type="string" required>
+  The token ID for the outcome token being traded
+</ResponseField>
+
+<ResponseField name="price" type="Price" required>
+  Price per outcome token (0-1 range)
+</ResponseField>
+
+<ResponseField name="size" type="Size" required>
+  Number of outcome tokens to trade
+</ResponseField>
+
+<ResponseField name="side" type="Side" required>
+  BUY or SELL
+</ResponseField>
+
+<ResponseField name="feeRateBps" type="uint32">
+  Fee rate in basis points (optional, defaults to 0)
+</ResponseField>
+
+<ResponseField name="nonce" type="EvmUInt256">
+  Nonce for order uniqueness (optional)
+</ResponseField>
+
+<ResponseField name="expiration" type="Timestamp">
+  Unix timestamp when order expires (optional, 0 = no expiration)
+</ResponseField>
+
+<ResponseField name="taker" type="Address">
+  Specific taker address (optional, zero address = any taker)
+</ResponseField>
+
+## SignedOrder
+
+Complete signed order ready for submission to the CLOB. This matches the on-chain order format.
+
+<ResponseField name="salt" type="int" required>
+  Random value for order uniqueness
+</ResponseField>
+
+<ResponseField name="maker" type="string" required>
+  Address of the order maker
+</ResponseField>
+
+<ResponseField name="signer" type="string" required>
+  Address that signed the order (usually same as maker)
+</ResponseField>
+
+<ResponseField name="taker" type="string" required>
+  Address of specific taker (zero address for any taker)
+</ResponseField>
+
+<ResponseField name="tokenId" type="string" required>
+  The outcome token ID being traded
+</ResponseField>
+
+<ResponseField name="makerAmount" type="string" required>
+  Amount the maker is providing (in token units)
+</ResponseField>
+
+<ResponseField name="takerAmount" type="string" required>
+  Amount the taker must provide (in token units)
+</ResponseField>
+
+<ResponseField name="side" type="int" required>
+  0 = BUY, 1 = SELL
+</ResponseField>
+
+<ResponseField name="expiration" type="string" required>
+  Unix timestamp when order expires (0 = no expiration)
+</ResponseField>
+
+<ResponseField name="nonce" type="string" required>
+  Nonce for order uniqueness
+</ResponseField>
+
+<ResponseField name="feeRateBps" type="string" required>
+  Fee rate in basis points
+</ResponseField>
+
+<ResponseField name="signatureType" type="int" required>
+  Type of signature used (0 = EOA, 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE)
+</ResponseField>
+
+<ResponseField name="signature" type="string" required>
+  EIP-712 signature of the order
+</ResponseField>
+
+## OrderResponse
+
+L2 order response from posting orders to API. This is returned when creating/posting orders, NOT when querying existing orders.
+
+<ResponseField name="success" type="bool">
+  Whether the order submission was successful
+</ResponseField>
+
+<ResponseField name="errorMsg" type="OrderErrorMessage">
+  Error message if submission failed (converted from string)
+</ResponseField>
+
+<ResponseField name="orderID" type="string">
+  Unique order ID assigned by the CLOB
+</ResponseField>
+
+<ResponseField name="transactionsHashes" type="seq[string]">
+  Optional array of transaction hashes (may be absent)
+</ResponseField>
+
+<ResponseField name="status" type="OrderInsertStatus">
+  Order execution status (converted from string)
+</ResponseField>
+
+<ResponseField name="takingAmount" type="Size">
+  Amount being taken from the order
+</ResponseField>
+
+<ResponseField name="makingAmount" type="Size">
+  Amount being made available by the order
+</ResponseField>
+
+## OpenOrderResponse
+
+Open order details returned when querying existing orders. This is different from OrderResponse which is returned when posting orders.
+
+<ResponseField name="id" type="string">
+  Unique order ID
+</ResponseField>
+
+<ResponseField name="status" type="OrderStatus">
+  Order status (converted from string to enum)
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  Address of the order owner
+</ResponseField>
+
+<ResponseField name="maker_address" type="string">
+  Address of the order maker
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Market condition ID
+</ResponseField>
+
+<ResponseField name="asset_id" type="string">
+  Token ID of the asset being traded
+</ResponseField>
+
+<ResponseField name="side" type="Side">
+  Order side (converted from string to enum)
+</ResponseField>
+
+<ResponseField name="original_size" type="Size">
+  Original order size (converted from string)
+</ResponseField>
+
+<ResponseField name="size_matched" type="Size">
+  Amount of order that has been matched (converted from string)
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Order price (converted from string)
+</ResponseField>
+
+<ResponseField name="associate_trades" type="seq[string]">
+  Array of associated trade IDs
+</ResponseField>
+
+<ResponseField name="outcome" type="string">
+  Outcome token name/description
+</ResponseField>
+
+<ResponseField name="created_at" type="Timestamp">
+  Unix timestamp when order was created
+</ResponseField>
+
+<ResponseField name="expiration" type="Timestamp">
+  Expiration timestamp (converted from string)
+</ResponseField>
+
+<ResponseField name="order_type" type="OrderType">
+  Order type (converted from string to enum)
+</ResponseField>
+
+## OrderStatus
+
+Order status for open orders.
+
+- `LIVE` - Order is live on the book
+- `OPEN` - Order is open
+- `FILLED` - Order has been completely filled
+- `CANCELED` - Order has been canceled
+- `PARTIALLY_FILLED` - Order has been partially filled
+
+## OrderType
+
+Order execution types.
+
+- `GTC` - Good Till Canceled - order stays active until filled or canceled
+- `FOK` - Fill or Kill - order must be filled immediately and completely or canceled
+- `FAK` - Fill and Kill - fill any amount immediately, cancel remainder
+- `GTD` - Good Till Date - order expires at specified time
+
+## PostOrderOptions
+
+Options for posting orders.
+
+<ResponseField name="orderType" type="OrderType" required>
+  Order type (optional, defaults to GTC)
+</ResponseField>
+
+<ResponseField name="postOnly" type="bool" required>
+  Post-only flag (optional, defaults to false)
+</ResponseField>
+
+## CreateOrderOptions
+
+Options for creating limit orders.
+
+<ResponseField name="tickSize" type="TickSize" required>
+  Price tick size for the market
+</ResponseField>
+
+<ResponseField name="negRisk" type="bool" required>
+  Whether negative risk is enabled (optional)
+</ResponseField>
