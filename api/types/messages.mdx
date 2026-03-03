@@ -1,0 +1,418 @@
+---
+title: "WebSocket Message Types"
+description: "WebSocket message types for real-time data streaming in the Polycule Nim SDK"
+---
+
+## BookMessage
+
+Book message received via WebSocket (event_type="book" is implicit).
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID)
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="hash" type="string">
+  Hash summary of orderbook content
+</ResponseField>
+
+<ResponseField name="bids" type="seq[OrderSummary]">
+  Array of bid orders
+</ResponseField>
+
+<ResponseField name="asks" type="seq[OrderSummary]">
+  Array of ask orders
+</ResponseField>
+
+<ResponseField name="last_trade_price" type="Price">
+  Last trade price
+</ResponseField>
+
+## PriceChangeMessage
+
+Price change message received via WebSocket (event_type="price_change" is implicit).
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="price_changes" type="seq[PriceChange]">
+  Array of price change objects
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+### PriceChange
+
+Nested object within PriceChangeMessage.
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID)
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="size" type="Size">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="side" type="Side">
+  Parse to Side enum
+</ResponseField>
+
+<ResponseField name="hash" type="string">
+  Hash of the order
+</ResponseField>
+
+<ResponseField name="best_bid" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="best_ask" type="Price">
+  Parse to float
+</ResponseField>
+
+## TickSizeChangeMessage
+
+Tick size change message received via WebSocket (event_type="tick_size_change" is implicit).
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID)
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="old_tick_size" type="TickSize">
+  Parse to TickSize enum
+</ResponseField>
+
+<ResponseField name="new_tick_size" type="TickSize">
+  Parse to TickSize enum
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+## LastTradePriceMessage
+
+Last trade price message received via WebSocket (event_type="last_trade_price" is implicit).
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID)
+</ResponseField>
+
+<ResponseField name="fee_rate_bps" type="uint32">
+  Parse to uint32
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Market condition ID
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="size" type="Size">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="side" type="Side">
+  Parse to Side enum
+</ResponseField>
+
+<ResponseField name="transaction_hash" type="string">
+  Transaction hash on blockchain
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+## BestBidAskMessage
+
+Best bid/ask message received via WebSocket (event_type="best_bid_ask" is implicit).
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID)
+</ResponseField>
+
+<ResponseField name="best_ask" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="best_bid" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="spread" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+## OrderMessage
+
+Order message received via WebSocket (event_type="order" is implicit).
+
+<ResponseField name="asset_id" type="string">
+  Asset ID (token ID) of order
+</ResponseField>
+
+<ResponseField name="associate_trades" type="seq[string]">
+  Array of IDs referencing trades (can be null)
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  Order ID
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="order_owner" type="string">
+  Owner of order
+</ResponseField>
+
+<ResponseField name="original_size" type="Size">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="outcome" type="string">
+  Outcome name/description
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  Owner of orders
+</ResponseField>
+
+<ResponseField name="price" type="Price">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="side" type="Side">
+  Parse to Side enum
+</ResponseField>
+
+<ResponseField name="size_matched" type="Size">
+  Parse to float
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="type" type="OrderMessageType">
+  PLACEMENT/UPDATE/CANCELLATION (enum)
+</ResponseField>
+
+## TradeMessage
+
+Trade message received via WebSocket (event_type="trade" is implicit). See [Trade Types](/api/types/trades#trademessage) for details.
+
+## NewMarketMessage
+
+New market message received via WebSocket (event_type="new_market" is implicit).
+
+<ResponseField name="id" type="string">
+  Market ID
+</ResponseField>
+
+<ResponseField name="question" type="string">
+  Market question
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  Market slug
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Market description
+</ResponseField>
+
+<ResponseField name="assets_ids" type="seq[string]">
+  List of asset IDs
+</ResponseField>
+
+<ResponseField name="outcomes" type="seq[string]">
+  List of outcomes
+</ResponseField>
+
+<ResponseField name="event_message" type="EventMessage">
+  Event message object
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="tags" type="seq[string]">
+  Array of market tags
+</ResponseField>
+
+### EventMessage
+
+Nested object within NewMarketMessage and MarketResolvedMessage.
+
+<ResponseField name="id" type="string">
+  Event message ID
+</ResponseField>
+
+<ResponseField name="ticker" type="string">
+  Event message ticker
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  Event message slug
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Event message title
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Event message description
+</ResponseField>
+
+## MarketResolvedMessage
+
+Market resolved message received via WebSocket (event_type="market_resolved" is implicit).
+
+<ResponseField name="id" type="string">
+  Market ID
+</ResponseField>
+
+<ResponseField name="market" type="string">
+  Condition ID of market
+</ResponseField>
+
+<ResponseField name="assets_ids" type="seq[string]">
+  List of asset IDs
+</ResponseField>
+
+<ResponseField name="winning_asset_id" type="string">
+  Winning asset ID
+</ResponseField>
+
+<ResponseField name="winning_outcome" type="string">
+  Winning outcome
+</ResponseField>
+
+<ResponseField name="event_message" type="EventMessage">
+  Event message object
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Parse timestamp to int64
+</ResponseField>
+
+<ResponseField name="tags" type="seq[string]">
+  Array of market tags
+</ResponseField>
+
+## CryptoPriceUpdateMessage
+
+Crypto price update message received via WebSocket from RTDS.
+
+<ResponseField name="connection_id" type="string">
+  Connection ID
+</ResponseField>
+
+<ResponseField name="timestamp" type="Timestamp">
+  Message timestamp
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Message type
+</ResponseField>
+
+<ResponseField name="topic" type="string">
+  Topic name
+</ResponseField>
+
+<ResponseField name="payload" type="CryptoPriceUpdatePayload">
+  Payload containing price data
+</ResponseField>
+
+### CryptoPriceUpdatePayload
+
+<ResponseField name="timestamp" type="Timestamp">
+  Price timestamp in Unix milliseconds
+</ResponseField>
+
+<ResponseField name="value" type="Size">
+  Current price value
+</ResponseField>
+
+<ResponseField name="full_accuracy_value" type="string">
+  Full accuracy price value
+</ResponseField>
+
+<ResponseField name="symbol" type="string">
+  Trading pair symbol
+</ResponseField>
+
+## CryptoPriceSubscribeMessage
+
+Crypto price subscription message received via WebSocket from RTDS.
+
+<ResponseField name="timestamp" type="Timestamp">
+  Message timestamp
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Message type
+</ResponseField>
+
+<ResponseField name="topic" type="string">
+  Topic name
+</ResponseField>
+
+<ResponseField name="payload" type="CryptoPriceSubscribePayload">
+  Payload containing snapshot data
+</ResponseField>
+
+### CryptoPriceSubscribePayload
+
+<ResponseField name="data" type="seq[CryptoPriceSnapShot]">
+  Array of price snapshots
+</ResponseField>
+
+<ResponseField name="symbol" type="string">
+  Trading pair symbol
+</ResponseField>
+
+### CryptoPriceSnapShot
+
+<ResponseField name="timestamp" type="Timestamp">
+  Price timestamp in Unix milliseconds
+</ResponseField>
+
+<ResponseField name="value" type="Size">
+  Current price value
+</ResponseField>

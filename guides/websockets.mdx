@@ -1,0 +1,522 @@
+---
+title: WebSocket Connections
+description: Real-time market data and order updates via WebSocket channels
+---
+
+The Polycule SDK provides three WebSocket channels for real-time data:
+
+- **Market Channel**: Order books, price changes, trade data
+- **User Channel**: Your orders and trades
+- **RTDS (Real-Time Data Socket)**: External price feeds (Binance, Chainlink)
+
+## Market Channel
+
+The market channel streams real-time updates for specific markets, including order book changes, best bid/ask, trade prices, and tick size changes.
+
+### Connecting to Market Channel
+
+<Steps>
+  <Step title="Connect via Client">
+    Use the `listenToMarketWss()` method on your Polycule client:
+
+    ```nim
+    import polycule
+    import std/[os, uri]
+
+    let
+      RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+      PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+      client = await newPolycule(
+        PRIVATE_KEY,
+        PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+      )
+    
+    # Set the market you want to monitor
+    await client.setMarket("btc-15min-2024-03-15")
+    
+    # Connect to market channel
+    await client.listenToMarketWss()
+    ```
+  </Step>
+
+  <Step title="Register Message Handlers">
+    Define callback functions for different message types:
+
+    ```nim
+    # Handle order book updates
+    proc onBook(msg: BookMessage) {.async, gcsafe.} =
+      echo "Book | ",
+        msg.asset_id.get("?"),
+        " | bids: ", msg.bids.get(@[]).len,
+        " asks: ", msg.asks.get(@[]).len
+
+    # Handle best bid/ask updates
+    proc onBestBidAsk(msg: BestBidAskMessage) {.async, gcsafe.} =
+      echo "BestBidAsk | ",
+        msg.best_ask.get(Price(0.0)), " / ",
+        msg.best_bid.get(Price(0.0))
+
+    # Register handlers
+    client.onBook = onBook
+    client.onBestBidAsk = onBestBidAsk
+    ```
+  </Step>
+</Steps>
+
+### Message Types
+
+<Tabs>
+  <Tab title="Book Updates">
+    Full order book snapshots with all bids and asks.
+
+    ```nim examples/log_prices.nim
+    proc onBook(msg: BookMessage) {.async, gcsafe.} =
+      echo "Book | ",
+        msg.asset_id.get("?"),
+        " | bids: ",
+        msg.bids.get(@[]).len,
+        " asks: ",
+        msg.asks.get(@[]).len
+
+    client.onBook = onBook
+    ```
+
+    **BookMessage Fields:**
+    - `asset_id`: Token ID
+    - `market`: Market condition ID
+    - `timestamp`: Unix timestamp
+    - `bids`: Array of bid orders `[{price, size}]`
+    - `asks`: Array of ask orders `[{price, size}]`
+    - `hash`: Order book hash
+    - `last_trade_price`: Last trade price
+  </Tab>
+
+  <Tab title="Price Changes">
+    Individual price level changes in the order book.
+
+    ```nim examples/log_prices.nim
+    proc onPriceChange(msg: PriceChangeMessage) {.async, gcsafe.} =
+      echo "PriceChange | ",
+        msg.market.get("?"), " | ",
+        msg.price_changes.get(@[]).len, " changes"
+
+    client.onPriceChange = onPriceChange
+    ```
+
+    **PriceChangeMessage Fields:**
+    - `market`: Market condition ID
+    - `price_changes`: Array of changes
+    - `timestamp`: Unix timestamp
+
+    Each `PriceChange` contains:
+    - `asset_id`: Token ID
+    - `price`: New price
+    - `size`: New size at that price
+    - `side`: BUY or SELL
+    - `best_bid`: Current best bid
+    - `best_ask`: Current best ask
+  </Tab>
+
+  <Tab title="Best Bid/Ask">
+    Top of book - best available prices.
+
+    ```nim examples/log_prices.nim
+    proc onBestBidAsk(msg: BestBidAskMessage) {.async, gcsafe.} =
+      echo "BestBidAsk | ",
+        msg.best_ask.get(Price(0.0)), " / ",
+        msg.best_bid.get(Price(0.0))
+
+    client.onBestBidAsk = onBestBidAsk
+    ```
+
+    **BestBidAskMessage Fields:**
+    - `market`: Market condition ID
+    - `asset_id`: Token ID
+    - `best_ask`: Best ask price
+    - `best_bid`: Best bid price
+    - `spread`: Bid-ask spread
+    - `timestamp`: Unix timestamp
+  </Tab>
+
+  <Tab title="Last Trade Price">
+    Most recent trade execution.
+
+    ```nim examples/log_prices.nim
+    proc onLastTradePrice(msg: LastTradePriceMessage) {.async, gcsafe.} =
+      echo "LastTrade | ",
+        msg.side.get(BUY),
+        " ",
+        msg.size.get(Size(0.0)),
+        " @ ",
+        msg.price.get(Price(0.0))
+
+    client.onLastTradePrice = onLastTradePrice
+    ```
+
+    **LastTradePriceMessage Fields:**
+    - `asset_id`: Token ID
+    - `market`: Market condition ID
+    - `price`: Trade price
+    - `size`: Trade size
+    - `side`: BUY or SELL
+    - `fee_rate_bps`: Fee rate in basis points
+    - `transaction_hash`: On-chain tx hash
+    - `timestamp`: Unix timestamp
+  </Tab>
+
+  <Tab title="Tick Size Changes">
+    Tick size adjustments for the market.
+
+    ```nim examples/log_prices.nim
+    proc onTickSizeChange(msg: TickSizeChangeMessage) {.async, gcsafe.} =
+      echo "TickSize | ",
+        msg.asset_id.get("?"),
+        " | ",
+        msg.old_tick_size.get(TICK_0_01),
+        " -> ",
+        msg.new_tick_size.get(TICK_0_01)
+
+    client.onTickSizeChange = onTickSizeChange
+    ```
+
+    **TickSizeChangeMessage Fields:**
+    - `asset_id`: Token ID
+    - `market`: Market condition ID
+    - `old_tick_size`: Previous tick size
+    - `new_tick_size`: New tick size
+    - `timestamp`: Unix timestamp
+  </Tab>
+</Tabs>
+
+## User Channel
+
+The user channel streams real-time updates for your orders and trades.
+
+<Warning>
+The user channel requires authentication with your API credentials.
+</Warning>
+
+### Connecting to User Channel
+
+```nim examples/log_prices.nim
+# Define trade handler
+proc onTrade(msg: TradeMessage) {.async, gcsafe.} =
+  echo "Trade | ",
+    msg.side.get(BUY),
+    " ",
+    msg.size.get(Size(0.0)),
+    " @ ",
+    msg.price.get(Price(0.0)),
+    " | ",
+    msg.status.get(MATCHED)
+
+# Define order handler
+proc onOrder(msg: OrderMessage) {.async, gcsafe.} =
+  echo "Order | ",
+    msg.`type`.get(PLACEMENT_EVENT),
+    " ",
+    msg.side.get(BUY),
+    " ",
+    msg.original_size.get(Size(0.0)),
+    " @ ",
+    msg.price.get(Price(0.0))
+
+# Register handlers
+client.onTrade = onTrade
+client.onOrder = onOrder
+
+# Connect to user channel
+await client.listenToUserWss()
+```
+
+### User Message Types
+
+<Tabs>
+  <Tab title="Trade Events">
+    Notifications when your orders are matched.
+
+    ```nim
+    proc onTrade(msg: TradeMessage) {.async, gcsafe.} =
+      echo "Trade executed!"
+      echo "  Side: ", msg.side.get(BUY)
+      echo "  Size: ", msg.size.get(Size(0.0))
+      echo "  Price: ", msg.price.get(Price(0.0))
+      echo "  Status: ", msg.status.get(MATCHED)
+      echo "  Trade ID: ", msg.id.get("")
+
+    client.onTrade = onTrade
+    ```
+
+    **TradeMessage Fields:**
+    - `id`: Trade ID
+    - `side`: BUY or SELL
+    - `size`: Trade size
+    - `price`: Trade price
+    - `status`: MATCHED, MINED, CONFIRMED, RETRYING, or FAILED
+    - `asset_id`: Token ID
+    - `market`: Market condition ID
+    - `taker_order_id`: Taker order ID
+    - `maker_orders`: Array of maker order details
+  </Tab>
+
+  <Tab title="Order Events">
+    Order lifecycle events: placement, updates, cancellations.
+
+    ```nim
+    proc onOrder(msg: OrderMessage) {.async, gcsafe.} =
+      case msg.`type`.get(PLACEMENT_EVENT)
+      of PLACEMENT_EVENT:
+        echo "Order placed: ", msg.id.get("")
+      of UPDATE_EVENT:
+        echo "Order updated: ", msg.id.get("")
+      of CANCELLATION_EVENT:
+        echo "Order canceled: ", msg.id.get("")
+
+    client.onOrder = onOrder
+    ```
+
+    **OrderMessage Fields:**
+    - `id`: Order ID
+    - `type`: PLACEMENT_EVENT, UPDATE_EVENT, or CANCELLATION_EVENT
+    - `side`: BUY or SELL
+    - `original_size`: Original order size
+    - `size_matched`: Amount matched so far
+    - `price`: Order price
+    - `asset_id`: Token ID
+    - `market`: Market condition ID
+    - `associate_trades`: Array of trade IDs
+  </Tab>
+</Tabs>
+
+## RTDS (Real-Time Data Socket)
+
+RTDS provides external price feeds from Binance and Chainlink.
+
+### Connecting to RTDS
+
+<Steps>
+  <Step title="Start RTDS Listener">
+    ```nim examples/log_prices.nim
+    await client.listenToRtds()
+    ```
+  </Step>
+
+  <Step title="Define Message Handlers">
+    ```nim examples/log_prices.nim
+    proc onSubscribe(msg: CryptoPriceSubscribeMessage) {.async, gcsafe.} =
+      echo "First Sync"
+      echo msg.payload.value().data.value()[0]
+
+    proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+      echo "New update"
+      echo msg.payload.value()
+
+    client.onCryptoPriceUpdate = onUpdate
+    client.onCryptoPriceSubscribe = onSubscribe
+    ```
+  </Step>
+
+  <Step title="Subscribe to Price Feeds">
+    ```nim examples/log_prices.nim
+    # Subscribe to Chainlink BTC/USD feed
+    await client.subscribe(
+      CHAINLINK_CRYPTO_PRICES,
+      UPDATE,
+      @["btc/usd"]
+    )
+
+    # Subscribe to Binance BTCUSDT feed
+    await client.subscribe(
+      BINANCE_CRYPTO_PRICES,
+      UPDATE,
+      @["btcusdt"]
+    )
+    ```
+  </Step>
+</Steps>
+
+### RTDS Message Types
+
+<Tabs>
+  <Tab title="Subscribe Messages">
+    Initial data dump when subscribing to a feed.
+
+    ```nim
+    proc onSubscribe(msg: CryptoPriceSubscribeMessage) {.async, gcsafe.} =
+      let data = msg.payload.value().data.value()
+      for snapshot in data:
+        echo "Timestamp: ", snapshot.timestamp.get(Timestamp(0))
+        echo "Price: ", snapshot.value.get(Size(0.0))
+
+    client.onCryptoPriceSubscribe = onSubscribe
+    ```
+
+    **CryptoPriceSubscribeMessage Fields:**
+    - `timestamp`: Message timestamp
+    - `type`: Message type ("subscribe")
+    - `topic`: Feed topic
+    - `payload.data`: Array of price snapshots
+    - `payload.symbol`: Trading pair symbol
+  </Tab>
+
+  <Tab title="Update Messages">
+    Real-time price updates.
+
+    ```nim
+    proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+      let payload = msg.payload.value()
+      echo "Symbol: ", payload.symbol.get("")
+      echo "Price: ", payload.value.get(Size(0.0))
+      echo "Timestamp: ", payload.timestamp.get(Timestamp(0))
+
+    client.onCryptoPriceUpdate = onUpdate
+    ```
+
+    **CryptoPriceUpdateMessage Fields:**
+    - `timestamp`: Message timestamp
+    - `type`: Message type ("update")
+    - `topic`: Feed topic
+    - `payload.symbol`: Trading pair symbol
+    - `payload.value`: Current price
+    - `payload.timestamp`: Price timestamp
+  </Tab>
+</Tabs>
+
+### Available Price Feeds
+
+| Topic | Description | Symbols |
+|-------|-------------|----------|
+| `CHAINLINK_CRYPTO_PRICES` | Chainlink oracle feeds | `btc/usd`, `eth/usd`, etc. |
+| `BINANCE_CRYPTO_PRICES` | Binance spot prices | `btcusdt`, `ethusdt`, etc. |
+
+## WebSocket Configuration
+
+Customize connection behavior with `WsConfig`:
+
+```nim src/polycule/global.nim
+type WsConfig* = object
+  pingInterval*: Duration         # How often to send ping frames
+  livenessTimeout*: Duration      # Timeout before reconnecting
+  shouldReconnect*: bool          # Auto-reconnect on disconnect
+```
+
+### Default Configuration
+
+```nim src/polycule/websockets/websockets.nim
+let config = WsConfig(
+  pingInterval: 500.millis,
+  livenessTimeout: 1.minutes,
+  shouldReconnect: true
+)
+```
+
+### Automatic Reconnection
+
+The SDK automatically reconnects on connection loss:
+
+```nim src/polycule/websockets/websockets.nim
+proc heartbeatLoop*[T: Ws](ws: T) {.async.} =
+  while ws.session.readyState == ReadyState.Open:
+    let now = Moment.now()
+    if (now - ws.lastActivity) > ws.config.livenessTimeout:
+      warn "Connection liveness timeout",
+        url = ws.url,
+        lastActivity = ws.lastActivity,
+        timeout = ws.config.livenessTimeout
+
+      if ws.config.shouldReconnect:
+        await ws.reconnect()
+    else:
+      await sleepAsync(ws.config.pingInterval)
+      await ws.session.ping()
+```
+
+## Complete Example
+
+Here's a complete example monitoring multiple channels:
+
+```nim
+import polycule
+import std/[os, uri, asyncdispatch]
+
+proc main() {.async.} =
+  let
+    RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+    PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+    client = await newPolycule(
+      PRIVATE_KEY,
+      PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+    )
+
+  # Set market
+  let marketSlug = getCryptoCurrentMarketSlug("btc", MINUTE15)
+  await client.setMarket(marketSlug)
+
+  # Market channel handlers
+  proc onBestBidAsk(msg: BestBidAskMessage) {.async, gcsafe.} =
+    echo "BestBidAsk | ",
+      msg.best_ask.get(Price(0.0)), " / ",
+      msg.best_bid.get(Price(0.0))
+
+  proc onLastTradePrice(msg: LastTradePriceMessage) {.async, gcsafe.} =
+    echo "LastTrade | ",
+      msg.side.get(BUY), " ",
+      msg.size.get(Size(0.0)), " @ ",
+      msg.price.get(Price(0.0))
+
+  # User channel handlers
+  proc onTrade(msg: TradeMessage) {.async, gcsafe.} =
+    echo "Trade | ",
+      msg.side.get(BUY), " ",
+      msg.size.get(Size(0.0)), " @ ",
+      msg.price.get(Price(0.0))
+
+  proc onOrder(msg: OrderMessage) {.async, gcsafe.} =
+    echo "Order | ",
+      msg.`type`.get(PLACEMENT_EVENT), " ",
+      msg.side.get(BUY), " ",
+      msg.original_size.get(Size(0.0))
+
+  # RTDS handlers
+  proc onPriceUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+    let payload = msg.payload.value()
+    echo "Price update | ",
+      payload.symbol.get(""), ": ",
+      payload.value.get(Size(0.0))
+
+  # Register all handlers
+  client.onBestBidAsk = onBestBidAsk
+  client.onLastTradePrice = onLastTradePrice
+  client.onTrade = onTrade
+  client.onOrder = onOrder
+  client.onCryptoPriceUpdate = onPriceUpdate
+
+  # Connect to all channels
+  await client.listenToMarketWss()
+  await client.listenToUserWss()
+  await client.listenToRtds()
+
+  # Subscribe to RTDS feeds
+  await client.subscribe(CHAINLINK_CRYPTO_PRICES, UPDATE, @["btc/usd"])
+  await client.subscribe(BINANCE_CRYPTO_PRICES, UPDATE, @["btcusdt"])
+
+  echo "Listening to all channels..."
+  runForever()
+
+when isMainModule:
+  waitFor main()
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trading" icon="chart-line" href="/guides/trading">
+    Learn how to place buy and sell orders
+  </Card>
+  <Card title="Order Management" icon="list" href="/guides/order-management">
+    Query and cancel orders
+  </Card>
+  <Card title="Market Data" icon="book" href="/guides/market-data">
+    Fetch order books and market info
+  </Card>
+</CardGroup>

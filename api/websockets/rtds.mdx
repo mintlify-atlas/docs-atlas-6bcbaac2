@@ -1,0 +1,336 @@
+---
+title: "Rtds"
+description: "Real-Time Data Socket for cryptocurrency price feeds and market data"
+---
+
+## Overview
+
+The `Rtds` (Real-Time Data Socket) provides WebSocket connections to real-time cryptocurrency price feeds from Binance and Chainlink. Use this to track crypto prices for conditional markets or build price-based trading strategies.
+
+## Connection
+
+### Connect to RTDS
+
+Establish a WebSocket connection to the real-time data feed:
+
+```nim
+import polycule
+
+let rtds = await Rtds.connect(
+    subscriptions = initTable[(RtdsTopic, RtdsMessageType), RtdsSubscriptionData](),
+    config = WsConfig(
+        pingInterval: 500.millis,
+        livenessTimeout: 1.minutes,
+        shouldReconnect: true
+    )
+)
+```
+
+**Parameters:**
+- `subscriptions`: Initial subscriptions table (can be empty)
+- `config`: WebSocket configuration for ping interval, timeout, and auto-reconnect
+- `postConnectHook`: Optional callback executed after initial connection
+- `postReconnectHook`: Optional callback executed after reconnection
+- `onClose`: Optional callback for connection close events
+
+**Returns:** `Future[Rtds]` - Connected RTDS instance
+
+**Reference:** `websockets.nim:403-448`
+
+## Topics
+
+RTDS supports multiple price feed topics:
+
+### Available Topics
+
+- `BINANCE_CRYPTO_PRICES`: Real-time prices from Binance exchange
+- `CHAINLINK_CRYPTO_PRICES`: Chainlink oracle price feeds
+
+**Reference:** `global.nim:112-114`
+
+### Message Types
+
+- `UPDATE`: Real-time price update messages
+
+**Reference:** `global.nim:124-126`
+
+## Subscription Management
+
+### Subscribe to Price Feeds
+
+Subscribe to specific cryptocurrency pairs:
+
+```nim
+# Subscribe to Binance price feed
+await rtds.subscribe(
+    BINANCE_CRYPTO_PRICES,
+    UPDATE,
+    RtdsSubscriptionData(filters: "btcusdt", gammaAuth: Opt.none(GammaAuth))
+)
+
+# Subscribe to Chainlink price feed
+await rtds.subscribe(
+    CHAINLINK_CRYPTO_PRICES,
+    UPDATE,
+    RtdsSubscriptionData(filters: "btc/usd", gammaAuth: Opt.none(GammaAuth))
+)
+```
+
+**Parameters:**
+- `topic`: Price feed topic (BINANCE_CRYPTO_PRICES or CHAINLINK_CRYPTO_PRICES)
+- `msgType`: Message type (UPDATE for price updates)
+- `data`: Subscription configuration
+  - `filters`: Symbol filter string (e.g., "btcusdt", "btc/usd")
+  - `gammaAuth`: Optional wallet authentication for authenticated feeds
+
+**Symbol Format:**
+- **Binance**: Lowercase, no separator (e.g., `btcusdt`, `ethusdt`)
+- **Chainlink**: Lowercase with slash (e.g., `btc/usd`, `eth/usd`)
+
+**Reference:** `rtds/rtds.nim:17-97`
+
+### Unsubscribe from Price Feeds
+
+Remove subscriptions:
+
+```nim
+await rtds.unsubscribe(
+    BINANCE_CRYPTO_PRICES,
+    UPDATE,
+    RtdsSubscriptionData(filters: "btcusdt", gammaAuth: Opt.none(GammaAuth))
+)
+```
+
+**Reference:** `rtds/rtds.nim:99-179`
+
+## Message Handlers
+
+Attach async callback functions to handle price feed events.
+
+### Initial Subscription Data
+
+Receive the initial snapshot of price data when subscribing:
+
+```nim
+proc onSubscribe(msg: CryptoPriceSubscribeMessage) {.async, gcsafe.} =
+    echo "First Sync"
+    echo msg.payload.value().data.value()[0]
+
+rtds.onCryptoPriceSubscribe = onSubscribe
+```
+
+**Message Fields:**
+- `timestamp`: Message timestamp (Unix timestamp)
+- `type`: Message type ("subscribe")
+- `topic`: Topic name ("crypto_prices" or "crypto_prices_chainlink")
+- `payload`: Subscription payload
+  - `data`: Array of initial price snapshots
+    - `timestamp`: Price timestamp
+    - `value`: Price value
+  - `symbol`: Trading pair symbol
+
+**Reference:** `rtds/rtds.nim:7-10`, `global.nim:494-506`
+
+### Real-Time Price Updates
+
+Receive live price updates as they occur:
+
+```nim
+proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+    echo "New update"
+    echo "Symbol: ", msg.payload.value().symbol.get("?")
+    echo "Price: ", msg.payload.value().value.get(Size(0.0))
+    echo "Timestamp: ", msg.payload.value().timestamp.get(Timestamp(0))
+
+rtds.onCryptoPriceUpdate = onUpdate
+```
+
+**Message Fields:**
+- `connection_id`: WebSocket connection identifier
+- `timestamp`: Message timestamp (Unix timestamp)
+- `type`: Message type ("update")
+- `topic`: Topic name
+- `payload`: Price update payload
+  - `timestamp`: Price timestamp
+  - `value`: Current price value
+  - `full_accuracy_value`: Full precision price string
+  - `symbol`: Trading pair symbol
+
+**Reference:** `rtds/rtds.nim:12-15`, `global.nim:508-517`
+
+## Error Handling
+
+Handle WebSocket errors and message parsing failures:
+
+```nim
+proc onError(msg: string, err: ref CatchableError) {.async, gcsafe.} =
+    echo "RTDS Error: ", err.msg
+    echo "Raw message: ", msg
+
+rtds.topicHandlers.onError = onError
+```
+
+**Reference:** `websockets.nim:64-82`
+
+## Message Routing
+
+Messages are automatically routed based on topic and message type:
+
+- Initial subscription: `onCryptoPriceSubscribe`
+- Price updates: `onCryptoPriceUpdate`
+
+**Reference:** `websockets.nim:64-82`
+
+## Connection Management
+
+### Auto-Reconnect
+
+The WebSocket automatically reconnects on connection loss if `shouldReconnect = true`:
+
+- Monitors connection liveness via ping/pong
+- Detects timeouts based on `livenessTimeout`
+- Automatically resubscribes to all topics after reconnect
+- Executes `postReconnectHook` if configured
+
+**Reference:** `websockets.nim:128-150`, `websockets.nim:152-186`
+
+### Shutdown
+
+Gracefully close the WebSocket connection:
+
+```nim
+await rtds.shutDown()
+```
+
+Disables auto-reconnect and closes the connection.
+
+**Reference:** `websockets.nim:467-471`
+
+## Complete Example
+
+```nim
+import std/[os, uri]
+import polycule
+
+proc main() {.async.} =
+    let
+        RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+        PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+        client = await newPolycule(
+            PRIVATE_KEY, EOA, PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+        )
+
+    # Define message handlers
+    proc onSubscribe(msg: CryptoPriceSubscribeMessage) {.async, gcsafe.} =
+        echo "First Sync"
+        if msg.payload.value().data.value().len > 0:
+            echo "Initial price: ", msg.payload.value().data.value()[0]
+
+    proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+        echo "New update"
+        echo "Symbol: ", msg.payload.value().symbol.get("?")
+        echo "Price: ", msg.payload.value().value.get(Size(0.0))
+
+    # Connect and subscribe
+    await client.listenToRtds()
+    client.onCryptoPriceUpdate = onUpdate
+    client.onCryptoPriceSubscribe = onSubscribe
+    
+    # Subscribe to multiple price feeds
+    await client.subscribe(CHAINLINK_CRYPTO_PRICES, UPDATE, @["btc/usd"])
+    await client.subscribe(BINANCE_CRYPTO_PRICES, UPDATE, @["btcusdt"])
+
+    # Keep running
+    while true:
+        await sleepAsync(5.seconds)
+
+when isMainModule:
+    waitFor main()
+    runForever()
+```
+
+**Reference:** `examples/log_prices.nim:18-31`
+
+## Use Cases
+
+### Track Bitcoin Price
+
+Monitor BTC/USD price from Chainlink:
+
+```nim
+proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+    let
+        symbol = msg.payload.value().symbol.get("?")
+        price = msg.payload.value().value.get(Size(0.0))
+    
+    if symbol == "btc/usd":
+        echo "Bitcoin: $", price
+
+rtds.onCryptoPriceUpdate = onUpdate
+await rtds.subscribe(
+    CHAINLINK_CRYPTO_PRICES,
+    UPDATE,
+    RtdsSubscriptionData(filters: "btc/usd", gammaAuth: Opt.none(GammaAuth))
+)
+```
+
+### Compare Multiple Exchanges
+
+Track prices from both Binance and Chainlink:
+
+```nim
+proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+    let
+        topic = msg.topic.get("?")
+        symbol = msg.payload.value().symbol.get("?")
+        price = msg.payload.value().value.get(Size(0.0))
+    
+    echo topic, " | ", symbol, ": $", price
+
+rtds.onCryptoPriceUpdate = onUpdate
+
+# Subscribe to both feeds
+await rtds.subscribe(BINANCE_CRYPTO_PRICES, UPDATE,
+    RtdsSubscriptionData(filters: "btcusdt", gammaAuth: Opt.none(GammaAuth)))
+await rtds.subscribe(CHAINLINK_CRYPTO_PRICES, UPDATE,
+    RtdsSubscriptionData(filters: "btc/usd", gammaAuth: Opt.none(GammaAuth)))
+```
+
+### Build Price Alerts
+
+Trigger alerts when prices cross thresholds:
+
+```nim
+var lastPrice = 0.0
+
+proc onUpdate(msg: CryptoPriceUpdateMessage) {.async, gcsafe.} =
+    let price = float(msg.payload.value().value.get(Size(0.0)))
+    
+    if lastPrice > 0.0:
+        if price > lastPrice * 1.01:
+            echo "Price increased by >1%: $", price
+        elif price < lastPrice * 0.99:
+            echo "Price decreased by >1%: $", price
+    
+    lastPrice = price
+
+rtds.onCryptoPriceUpdate = onUpdate
+```
+
+## Authentication
+
+Some RTDS feeds may require authentication using `GammaAuth`:
+
+```nim
+let auth = GammaAuth(address: "0x...")
+await rtds.subscribe(
+    CHAINLINK_CRYPTO_PRICES,
+    UPDATE,
+    RtdsSubscriptionData(
+        filters: "btc/usd",
+        gammaAuth: Opt.some(auth)
+    )
+)
+```
+
+**Reference:** `global.nim:519-528`

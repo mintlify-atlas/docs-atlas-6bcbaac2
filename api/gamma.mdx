@@ -1,0 +1,94 @@
+---
+title: "Gamma"
+description: "Fetch market information from the Polymarket Gamma API"
+---
+
+The Gamma module provides functions to retrieve market data from Polymarket's Gamma API endpoint.
+
+## Functions
+
+### getMarket
+
+Fetches market information by slug from the Gamma API.
+
+```nim
+import polycule/gamma/gamma
+
+let market = await getMarket("will-btc-hit-100k-by-2025")
+if market.isSome():
+  echo market.value().question
+```
+
+**Parameters**
+
+<ParamField path="slug" type="string" required>
+  The market slug identifier
+</ParamField>
+
+<ParamField path="includeTag" type="bool" default="false">
+  Whether to include tag information in the response
+</ParamField>
+
+**Returns**
+
+`Future[Opt[GammaMarketResponse]]` - An optional GammaMarketResponse containing market data
+
+**Endpoint**
+
+`GET https://gamma-api.polymarket.com/markets/slug/{slug}`
+
+## Types
+
+### GammaMarketResponse
+
+Response object containing market information from the Gamma API.
+
+<ResponseField name="id" type="Opt[string]">
+  Unique market identifier
+</ResponseField>
+
+<ResponseField name="question" type="Opt[string]">
+  The market question text
+</ResponseField>
+
+<ResponseField name="conditionId" type="Opt[string]">
+  The condition ID associated with the market
+</ResponseField>
+
+<ResponseField name="questionID" type="Opt[string]">
+  Alternative question identifier (note: Polymarket uses inconsistent casing)
+</ResponseField>
+
+<ResponseField name="slug" type="Opt[string]">
+  The market slug used as a URL-friendly identifier
+</ResponseField>
+
+<ResponseField name="negRisk" type="Opt[bool]">
+  Whether this is a neg-risk market
+</ResponseField>
+
+## Example Usage
+
+```nim
+import polycule/gamma/gamma
+import std/options
+
+proc fetchMarketData() {.async.} =
+  # Fetch market without tags
+  let market = await getMarket("will-btc-hit-100k-by-2025")
+  
+  if market.isSome():
+    let data = market.value()
+    
+    if data.question.isSome():
+      echo "Question: ", data.question.value()
+    
+    if data.conditionId.isSome():
+      echo "Condition ID: ", data.conditionId.value()
+    
+    if data.negRisk.isSome():
+      echo "Neg-risk market: ", data.negRisk.value()
+
+  # Fetch market with tags
+  let marketWithTags = await getMarket("will-btc-hit-100k-by-2025", includeTag = true)
+```

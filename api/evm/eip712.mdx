@@ -1,0 +1,451 @@
+---
+title: "EIP-712 Typed Data Signing"
+description: "EIP-712 structured data signing for Polymarket orders"
+---
+
+The EIP-712 module provides structured data signing for creating and signing Polymarket orders. Located in `polycule/evm/eip712.nim`.
+
+## Overview
+
+EIP-712 is a standard for hashing and signing typed structured data. Polymarket uses EIP-712 to create human-readable, verifiable order signatures that can be validated on-chain.
+
+## Core Types
+
+### EIP712Domain
+
+```nim
+type EIP712Domain = object
+  name: string
+  version: string
+  chainId: ChainId
+  verifyingContract: Address
+  salt: Bytes32
+```
+
+Defines the domain separator for EIP-712 signatures. All fields are optional.
+
+**Fields:**
+- `name`: Protocol name (e.g., "Polymarket CTF Exchange")
+- `version`: Protocol version (e.g., "1")
+- `chainId`: Network chain ID (e.g., 137 for Polygon)
+- `verifyingContract`: Contract address that will verify signatures
+- `salt`: Additional domain separator (rarely used)
+
+### EIP712Struct
+
+```nim
+type EIP712Struct = object
+  primaryType: string
+  types: Table[string, EIP712TypeDesc]
+  values: seq[Bytes32]
+```
+
+Represents the structured data to be signed.
+
+**Fields:**
+- `primaryType`: The main type being signed (e.g., "Order")
+- `types`: Type definitions for all structs referenced
+- `values`: Encoded field values
+
+### EIP712TypeDesc
+
+```nim
+type EIP712TypeDesc = seq[tuple[pName, pType: string]]
+```
+
+Describes the structure of an EIP-712 type.
+
+**Example:**
+```nim
+let orderType: EIP712TypeDesc = @[
+  ("salt", "uint256"),
+  ("maker", "address"),
+  ("signer", "address"),
+  ("taker", "address"),
+  ("tokenId", "uint256"),
+  ("makerAmount", "uint256"),
+  ("takerAmount", "uint256"),
+  ("expiration", "uint256"),
+  ("nonce", "uint256"),
+  ("feeRateBps", "uint256"),
+  ("side", "uint8"),
+  ("signatureType", "uint8")
+]
+```
+
+## Building EIP-712 Structures
+
+### buildEIP712Domain
+
+```nim
+func buildEIP712Domain(
+  name = "",
+  version = "",
+  chainId = ChainId.default(),
+  verifyingContract = Address.default(),
+  salt: EvmBytes32 = EvmBytes32.default()
+): EIP712Domain
+```
+
+Constructs an EIP-712 domain separator.
+
+**Parameters:**
+- `name`: Protocol name
+- `version`: Protocol version
+- `chainId`: Network chain ID
+- `verifyingContract`: Verifying contract address
+- `salt`: Optional salt value
+
+**Returns:** Configured domain object
+
+**Example:**
+```nim
+let domain = buildEIP712Domain(
+  name = "Polymarket CTF Exchange",
+  version = "1",
+  chainId = CHAIN_ID,
+  verifyingContract = CTF_EXCHANGE
+)
+```
+
+### buildEIP712Struct
+
+```nim
+func buildEIP712Struct(
+  primaryType: string,
+  types: openArray[tuple[structName: string, structTypedescs: EIP712TypeDesc]],
+  values: tuple
+): EIP712Struct
+```
+
+Constructs an EIP-712 struct from type definitions and values.
+
+**Parameters:**
+- `primaryType`: The primary type name (e.g., "Order")
+- `types`: Array of type definitions
+- `values`: Tuple of values matching the primary type's fields
+
+**Returns:** Configured struct ready for signing
+
+**Example:**
+```nim
+let orderStruct = buildEIP712Struct(
+  primaryType = "Order",
+  types = [("Order", orderTypeDesc)],
+  values = (
+    salt: evmuint256(12345),
+    maker: makerAddress,
+    signer: signerAddress,
+    taker: Address.default(),
+    tokenId: evmuint256(tokenId),
+    makerAmount: usdc(100),
+    takerAmount: share(50),
+    expiration: evmuint256(expiryTime),
+    nonce: evmuint256(0),
+    feeRateBps: evmuint256(0),
+    side: evmuint8(0),  # 0 = BUY, 1 = SELL
+    signatureType: evmuint8(0)  # 0 = EOA
+  )
+)
+```
+
+## Data Encoding
+
+The module provides encoding functions for all Solidity types.
+
+### encodeData Functions
+
+#### Unsigned Integers
+
+```nim
+func encodeData[T: static[int]](a: StUInt[T]): EvmBytes32
+```
+
+Encodes unsigned integers to 32-byte values.
+
+**Example:**
+```nim
+let encoded = encodeData(evmuint256(1000))
+```
+
+#### Signed Integers
+
+```nim
+func encodeData[T: static[int]](a: StInt[T]): EvmBytes32
+```
+
+Encodes signed integers to 32-byte values.
+
+#### Boolean
+
+```nim
+func encodeData(isTrue: bool): EvmBytes32
+```
+
+Encodes boolean as 0 or 1.
+
+**Example:**
+```nim
+let encoded = encodeData(true)  # Returns encodeData(evmuint256(1))
+```
+
+#### String
+
+```nim
+func encodeData(value: string): EvmBytes32
+```
+
+Encodes string as keccak256 hash.
+
+**Example:**
+```nim
+let encoded = encodeData("Hello, World!")
+```
+
+#### Fixed Bytes
+
+```nim
+func encodeData[T: static[int]](a: FixedBytes[T]): EvmBytes32
+```
+
+Encodes fixed-size byte arrays, padding to 32 bytes.
+
+#### Arrays
+
+```nim
+func encodeData[T](a: openArray[T]): EvmBytes32
+```
+
+Encodes arrays as keccak256 of concatenated encoded elements.
+
+**Example:**
+```nim
+let values = @[evmuint256(1), evmuint256(2), evmuint256(3)]
+let encoded = encodeData(values)
+```
+
+## Type Descriptions
+
+### typeof
+
+```nim
+proc typeof(domain: EIP712Domain): string
+proc typeof(struct: EIP712Struct): string
+```
+
+Generates the EIP-712 type string for a domain or struct.
+
+**Returns:** Type string used in signature hashing
+
+**Example:**
+```nim
+let domainType = typeof(domain)
+# Returns: "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+
+let structType = typeof(orderStruct)
+# Returns: "Order(uint256 salt,address maker,address signer,...)"
+```
+
+### Type String Format
+
+Type strings follow the EIP-712 specification:
+
+1. Reference types are sorted alphabetically and appended
+2. Array elements maintain their encoding order
+3. Duplicate types are deduplicated
+
+**Example with nested types:**
+```nim
+# If Order references Asset type:
+"Order(uint256 id,Asset asset)Asset(address token,uint256 amount)"
+```
+
+## Hashing
+
+### hashStruct
+
+```nim
+func hashStruct(struct: EIP712Struct): EvmBytes32
+func hashStruct(domain: EIP712Domain): EvmBytes32
+```
+
+Computes the EIP-712 struct hash.
+
+**Returns:** 32-byte hash of the struct
+
+**Algorithm:**
+```
+hashStruct(s) = keccak256(typeHash || encodeData(s))
+```
+
+Where:
+- `typeHash = keccak256(typeof(s))`
+- `encodeData(s)` is the concatenation of encoded field values
+
+**Example:**
+```nim
+let structHash = hashStruct(orderStruct)
+let domainHash = hashStruct(domain)
+```
+
+## Signing
+
+### signTypedData
+
+```nim
+func signTypedData(
+  privKey: PrivateKey,
+  domain: EIP712Domain,
+  data: EIP712Struct
+): string
+```
+
+Signs typed structured data using EIP-712.
+
+**Parameters:**
+- `privKey`: Private key for signing
+- `domain`: Domain separator
+- `data`: Structured data to sign
+
+**Returns:** Hex-encoded signature string (65 bytes)
+
+**Algorithm:**
+```
+signature = sign(keccak256("\x19\x01" || domainSeparator || structHash))
+```
+
+Where:
+- `domainSeparator = hashStruct(domain)`
+- `structHash = hashStruct(data)`
+- `\x19\x01` is the EIP-712 prefix
+
+**Example:**
+```nim
+let signature = privKey.signTypedData(domain, orderStruct)
+echo "Order signature: ", signature
+```
+
+## Complete Example: Signing an Order
+
+```nim
+import polycule/evm
+import std/times
+
+proc signOrder(privKey: PrivateKey): string =
+  # 1. Define the Order type structure
+  let orderType: EIP712TypeDesc = @[
+    ("salt", "uint256"),
+    ("maker", "address"),
+    ("signer", "address"),
+    ("taker", "address"),
+    ("tokenId", "uint256"),
+    ("makerAmount", "uint256"),
+    ("takerAmount", "uint256"),
+    ("expiration", "uint256"),
+    ("nonce", "uint256"),
+    ("feeRateBps", "uint256"),
+    ("side", "uint8"),
+    ("signatureType", "uint8")
+  ]
+  
+  # 2. Build the domain separator
+  let domain = buildEIP712Domain(
+    name = "Polymarket CTF Exchange",
+    version = "1",
+    chainId = CHAIN_ID,
+    verifyingContract = CTF_EXCHANGE
+  )
+  
+  # 3. Prepare order values
+  let
+    makerAddr = privKey.toPublicKey().to(Address)
+    expiryTime = now().toTime.toUnix + 86400  # 24 hours
+  
+  # 4. Build the order struct
+  let orderStruct = buildEIP712Struct(
+    primaryType = "Order",
+    types = [("Order", orderType)],
+    values = (
+      salt: evmuint256(12345),
+      maker: makerAddr,
+      signer: makerAddr,
+      taker: Address.default(),  # Zero address = any taker
+      tokenId: evmuint256(123456789),
+      makerAmount: usdc(100),  # Offering 100 USDC
+      takerAmount: share(50),  # Want 50 outcome tokens
+      expiration: evmuint256(expiryTime),
+      nonce: evmuint256(0),
+      feeRateBps: evmuint256(0),
+      side: evmuint8(0),  # BUY side
+      signatureType: evmuint8(0)  # EOA signature
+    )
+  )
+  
+  # 5. Sign the order
+  result = privKey.signTypedData(domain, orderStruct)
+
+# Usage
+let
+  privKey = PrivateKey.fromHex("0x...")
+  signature = signOrder(privKey)
+
+echo "Order signature: ", signature
+```
+
+## Reference Types
+
+Reference types (non-elementary types) are recursively hashed:
+
+```nim
+func isRefType(paramType: string): bool
+```
+
+Checks if a parameter type is a reference type (struct or array of structs).
+
+**Reference types include:**
+- Custom struct types (e.g., "Order", "Asset")
+- Arrays of any type (e.g., "uint256[]", "Order[]")
+
+**Elementary types include:**
+- All Solidity value types (address, bool, string, bytes1-32, int8-256, uint8-256)
+
+## Type Construction
+
+### constructTypeDesc
+
+```nim
+func constructTypeDesc(
+  name: string,
+  ctx: Table[string, EIP712TypeDesc],
+  sortStage = true
+): string
+```
+
+Constructs the full type description string, including referenced types.
+
+**Parameters:**
+- `name`: Primary type name
+- `ctx`: Table of all type definitions
+- `sortStage`: Whether to sort reference types (default: true)
+
+**Returns:** Complete type string following EIP-712 encoding rules
+
+## Best Practices
+
+1. **Domain Consistency**: Always use the same domain separator for a given contract and chain
+
+2. **Type Definitions**: Keep type definitions consistent with smart contract expectations
+
+3. **Expiration Times**: Set reasonable expiration times for orders (typically 24-48 hours)
+
+4. **Salt Values**: Use unique salt values to prevent signature replay
+
+5. **Zero Address**: Use `Address.default()` for the taker field to allow any taker
+
+6. **Signature Verification**: Verify signatures match expected format before submission
+
+## See Also
+
+- [EVM Overview](/api/evm/overview) - Core types and utilities
+- [Contract Interfaces](/api/evm/contracts) - Smart contract interactions
+- [EIP-712 Specification](https://eips.ethereum.org/EIPS/eip-712) - Official standard

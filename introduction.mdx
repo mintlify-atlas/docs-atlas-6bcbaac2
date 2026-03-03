@@ -1,0 +1,107 @@
+---
+title: Introduction
+description: A high-performance Nim SDK for trading on Polymarket's CLOB
+---
+
+<Note>
+  Polycule is currently in early development. APIs and interfaces may change.
+</Note>
+
+## What is Polycule?
+
+Polycule is a powerful Nim SDK for interacting with Polymarket's Central Limit Order Book (CLOB). Built for performance and type safety, it provides a complete toolkit for building trading bots, market makers, and analytics tools on Polymarket.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Full CLOB Integration" icon="chart-line">
+    Complete L1 and L2 API support for creating, managing, and canceling orders with proper EIP-712 signing.
+  </Card>
+  
+  <Card title="Real-Time WebSockets" icon="bolt">
+    Subscribe to market updates, order book changes, user trades, and crypto price feeds with WebSocket support.
+  </Card>
+  
+  <Card title="Smart Contract Interaction" icon="code">
+    Direct integration with Polymarket's CTF Exchange, ERC20 tokens, and neg-risk contracts on Polygon.
+  </Card>
+  
+  <Card title="Type-Safe Design" icon="shield-check">
+    Strongly typed interfaces with Result types, distinct types for Price/Size, and compile-time safety.
+  </Card>
+</CardGroup>
+
+## Core Capabilities
+
+### Trading Operations
+- Create and post limit orders (BUY/SELL)
+- Support for multiple order types: GTC, FOK, FAK, GTD
+- Post-only orders and order book management
+- Batch order creation (up to 15 orders)
+- Order cancellation (single or bulk)
+
+### Market Data
+- Real-time order book updates
+- Price change notifications
+- Last trade price tracking
+- Best bid/ask monitoring
+- Tick size change alerts
+
+### Account Management
+- L1 authentication with EIP-712 signatures
+- L2 HMAC-based API authentication
+- Support for EOA, Proxy, and Gnosis Safe wallets
+- Open orders and trade history queries
+
+### Specialized Features
+- Crypto up/down market utilities for BTC, ETH, SOL
+- Automatic market switching for time-based markets
+- Chainlink and Binance price feed subscriptions via RTDS
+- Neg-risk and standard market support
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Get started by installing Polycule via nimble
+  </Card>
+  
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create your first client and place an order
+  </Card>
+  
+  <Card title="Trading Guide" icon="book" href="/guides/trading">
+    Learn how to create and manage orders
+  </Card>
+  
+  <Card title="WebSockets" icon="satellite-dish" href="/guides/websockets">
+    Stream real-time market data
+  </Card>
+</CardGroup>
+
+## Architecture
+
+Polycule is organized into focused modules:
+
+- **clob**: CLOB API methods (L1 auth, L2 signed operations, public endpoints)
+- **evm**: Smart contract interactions (CTF, Exchange, ERC20, EIP-712)
+- **gamma**: Market data from Polymarket's Gamma API
+- **websockets**: Real-time WebSocket channels (market, user, RTDS)
+- **http_client**: HTTP client with retry logic and error handling
+
+## Why Nim?
+
+Nim provides:
+- **Performance**: Compiles to efficient C code, near-native speed
+- **Memory Safety**: Strong type system with compile-time checks
+- **Async/Await**: First-class async support via chronos
+- **Interop**: Easy C/C++ integration for existing trading infrastructure
+- **Small Binaries**: Ideal for deployment in resource-constrained environments
+
+## Community & Support
+
+Polycule is an open-source project. For questions, issues, or contributions, please visit the GitHub repository.
+
+<Note>
+  This SDK is not officially affiliated with Polymarket. Use at your own risk.
+</Note>

@@ -1,80 +1,288 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Build your first Polymarket trading bot with Polycule in minutes
 ---
 
-## Get started in three steps
+## Your First Trading Bot
 
-Get your documentation site running locally and make your first customization.
+This guide walks you through creating a Polycule client, setting a market, and placing your first order.
 
-### Step 1: Set up your local environment
+## Initialize the Client
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+First, create a `PolyculeClient` with your credentials:
+
+```nim
+import std/[os, uri]
+import polycule
+
+proc main() {.async.} =
+  let
+    RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+    PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+  # Create the client with EOA signature type
+  let client = await newPolycule(
+    PRIVATE_KEY,
+    PolyculeConfig(rpcUrl: Opt.some(RPC_URL)),
+    signatureType = SignatureType.EOA
+  )
+  
+  echo "Client created successfully!"
 
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+when isMainModule:
+  waitFor main()
+  runForever()
+```
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  The `signatureType` parameter defaults to `EOA` (Externally Owned Account). For Polymarket proxy wallets, use `SignatureType.POLY_PROXY`.
 </Note>
+
+## Set a Market
+
+Before placing orders, set the market you want to trade:
+
+```nim
+# Set a market using its slug
+await client.setMarket("will-btc-hit-100k-in-2025")
+
+echo "Market set: ", client.currentMarket.get().slug
+echo "Is neg-risk: ", client.currentMarket.get().isNegrisk
+```
+
+### Crypto Up/Down Markets
+
+For crypto prediction markets, use the built-in utility functions:
+
+```nim
+import polycule/miscellanous/crypto_updown_utils
+
+# Get the current 15-minute BTC market
+let marketSlug = getCryptoCurrentMarketSlug("btc", MINUTE15)
+await client.setMarket(marketSlug)
+
+echo "Trading on: ", marketSlug
+```
+
+<Tip>
+  Supported durations: `MINUTE5`, `MINUTE15`, `HOUR1`, `HOUR4`
+  
+  Supported tickers: `"btc"`, `"eth"`, `"sol"`
+</Tip>
+
+## Place Your First Order
+
+### Buy Order
+
+Place a buy order for the "YES" outcome:
+
+```nim
+# Buy 10 shares at $0.52 price
+let buyResult = await client.buy(
+  outcomeYes = true,      # Buy YES outcome
+  size = Size(10.0),      # 10 shares
+  price = Price(0.52),    # At $0.52 per share
+  PostOrderOptions(
+    orderType: OrderType.GTC,  # Good-til-canceled
+    postOnly: true             # Only add liquidity, don't take
+  )
+)
+
+if buyResult.isOk():
+  let response = buyResult.get()
+  echo "Order placed successfully!"
+  echo "Order ID: ", response.orderID.get()
+  echo "Status: ", response.status.get()
+else:
+  echo "Order failed: ", buyResult.error()
+```
+
+### Sell Order
+
+Place a sell order for the "NO" outcome:
+
+```nim
+# Sell 5 shares at $0.48 price
+let sellResult = await client.sell(
+  outcomeYes = false,     # Sell NO outcome
+  size = Size(5.0),       # 5 shares
+  price = Price(0.48),    # At $0.48 per share
+  PostOrderOptions(
+    orderType: OrderType.GTC,
+    postOnly: true
+  )
+)
+
+if sellResult.isOk():
+  echo "Sell order placed!"
+```
+
+## Order Types
+
+<CodeGroup>
+```nim GTC (Good-til-canceled)
+PostOrderOptions(
+  orderType: OrderType.GTC,
+  postOnly: true  # Optional: only add liquidity
+)
+```
+
+```nim FOK (Fill-or-kill)
+PostOrderOptions(
+  orderType: OrderType.FOK,
+  postOnly: false  # Must be false for FOK
+)
+```
+
+```nim FAK (Fill-and-kill)
+PostOrderOptions(
+  orderType: OrderType.FAK,
+  postOnly: false  # Must be false for FAK
+)
+```
+</CodeGroup>
+
+<Warning>
+  `postOnly` can only be `true` for `GTC` and `GTD` order types. FOK and FAK orders must have `postOnly: false`.
+</Warning>
+
+## Complete Example: Market Monitor
+
+Here's a complete example that monitors market prices using WebSockets:
+
+```nim
+import std/[os, uri]
+import polycule
+
+proc main() {.async.} =
+  let
+    RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+    PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+    client = await newPolycule(
+      PRIVATE_KEY,
+      PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+    )
+  
+  # Set up market
+  let marketSlug = getCryptoCurrentMarketSlug("btc", MINUTE15)
+  await client.setMarket(marketSlug)
+  
+  # Define WebSocket handler for best bid/ask updates
+  proc onBestBidAsk(msg: BestBidAskMessage) {.async, gcsafe.} =
+    echo "Best Bid: ", msg.best_bid.get(Price(0.0))
+    echo "Best Ask: ", msg.best_ask.get(Price(0.0))
+    echo "Spread: ", msg.spread.get(Price(0.0))
+  
+  # Start listening to market WebSocket
+  client.onBestBidAsk = onBestBidAsk
+  await client.listenToMarketWss()
+  
+  echo "Monitoring market: ", marketSlug
+  
+  # Keep running
+  while true:
+    await sleepAsync(1.seconds)
+
+when isMainModule:
+  waitFor main()
+  runForever()
+```
+
+## Query Open Orders
+
+Check your active orders:
+
+```nim
+let ordersResult = await client.getOpenOrders(
+  OpenOrderParams(
+    market: Opt.some(client.currentMarket.get().conditionId.get())
+  )
+)
+
+if ordersResult.isOk():
+  let orders = ordersResult.get()
+  echo "Open orders: ", orders.count.get()
+  
+  for order in orders.data.get():
+    echo "Order ", order.id.get(), ": ",
+         order.side.get(), " ",
+         order.original_size.get(), " @ ",
+         order.price.get()
+```
+
+## Cancel Orders
+
+<CodeGroup>
+```nim Cancel Single Order
+let cancelResult = await client.cancelOrder("order_id_here")
+
+if cancelResult.isOk():
+  echo "Canceled: ", cancelResult.get().canceled.get()
+```
+
+```nim Cancel All Orders
+let cancelResult = await client.cancelAll()
+
+if cancelResult.isOk():
+  let response = cancelResult.get()
+  echo "Canceled ", response.canceled.get().len, " orders"
+```
+
+```nim Cancel Specific Orders
+let cancelResult = await client.cancelAll(@[
+  "order_id_1",
+  "order_id_2",
+  "order_id_3"
+])
+```
+</CodeGroup>
+
+## Error Handling
+
+Polycule uses `Result[T, string]` types for error handling:
+
+```nim
+let orderResult = await client.buy(
+  outcomeYes = true,
+  size = Size(10.0),
+  price = Price(0.52)
+)
+
+if orderResult.isOk():
+  let response = orderResult.get()
+  
+  # Check if order was successful
+  if response.success.get():
+    echo "Order placed: ", response.orderID.get()
+  else:
+    echo "Order rejected: ", response.errorMsg.get()
+else:
+  # Network or API error
+  echo "Request failed: ", orderResult.error()
+```
+
+Common error messages:
+- `"order is invalid. Price breaks minimum tick size rules"`
+- `"not enough balance / allowance"`
+- `"invalid post-only order: order crosses book"`
+- `"order couldn't be fully filled, FOK orders are fully filled/killed"`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trading Guide" icon="chart-line" href="/guides/trading">
+    Learn advanced order strategies
+  </Card>
+  
+  <Card title="WebSockets" icon="bolt" href="/guides/websockets">
+    Stream real-time market data
+  </Card>
+  
+  <Card title="Market Data" icon="database" href="/guides/market-data">
+    Query historical data and analytics
+  </Card>
+  
+  <Card title="API Reference" icon="book" href="/api/polycule-client">
+    Complete API documentation
+  </Card>
+</CardGroup>

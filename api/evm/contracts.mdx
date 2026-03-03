@@ -1,0 +1,395 @@
+---
+title: "Contract Interfaces"
+description: "Smart contract interfaces for CTF, Exchange, and ERC20 tokens"
+---
+
+The EVM module provides high-level interfaces for interacting with Polymarket's smart contracts.
+
+## Conditional Token Framework (CTF)
+
+The CTF contract manages conditional tokens representing market outcomes. Located in `polycule/evm/ctf.nim`.
+
+### Contract Interface
+
+```nim
+contract ConditionalTokens:
+  proc balanceOf(account: Address, id: EvmUInt256): EvmUInt256
+  proc balanceOfBatch(accounts: seq[Address], ids: seq[EvmUInt256]): seq[EvmUInt256]
+  proc setApprovalForAll(operator: Address, approved: bool)
+  proc isApprovedForAll(account: Address, operator: Address): bool
+  proc splitPosition(
+    collateralToken: Address,
+    parentCollectionId: EvmBytes32,
+    conditionId: EvmBytes32,
+    partition: seq[EvmUInt256],
+    amount: EvmUInt256
+  )
+  proc mergePositions(
+    collateralToken: Address,
+    parentCollectionId: EvmBytes32,
+    conditionId: EvmBytes32,
+    partition: seq[EvmUInt256],
+    amount: EvmUInt256
+  )
+  proc redeemPositions(
+    collateralToken: Address,
+    parentCollectionId: EvmBytes32,
+    conditionId: EvmBytes32,
+    indexSets: seq[EvmUInt256]
+  )
+```
+
+### Position ID Derivation
+
+The CTF uses BN254 curve operations to derive position IDs from condition IDs.
+
+#### getCollectionId
+
+```nim
+func getCollectionId(conditionId: EvmBytes32, indexSet: EvmUInt256): EvmBytes32
+```
+
+Derives a collection ID from a condition ID and index set using elliptic curve point compression.
+
+**Parameters:**
+- `conditionId`: The condition identifier (32 bytes)
+- `indexSet`: Index set indicating outcome (1 for Yes, 2 for No)
+
+**Returns:** Collection ID (32 bytes)
+
+**Algorithm:**
+1. Hash `conditionId` and `indexSet` to get initial x-coordinate
+2. Find a point on the BN254 curve (y² = x³ + 3)
+3. Encode y-coordinate parity in bit 254 of x-coordinate
+
+#### getPositionId
+
+```nim
+proc getPositionId(collateralToken: Address, collectionId: EvmBytes32): EvmUInt256
+```
+
+Computes a position ID from collateral token address and collection ID.
+
+**Parameters:**
+- `collateralToken`: Address of the collateral token
+- `collectionId`: Collection identifier
+
+**Returns:** Position token ID (256-bit integer)
+
+#### derivePositionId
+
+```nim
+proc derivePositionId(
+  collateralToken: Address,
+  conditionId: EvmBytes32,
+  isYes: bool
+): EvmUInt256
+```
+
+Convenience function to derive a position ID directly from a condition.
+
+**Parameters:**
+- `collateralToken`: Address of the collateral token
+- `conditionId`: The condition identifier
+- `isYes`: `true` for Yes outcome, `false` for No outcome
+
+**Returns:** Position token ID
+
+**Example:**
+```nim
+let yesTokenId = derivePositionId(
+  COLLATERAL_TOKEN,
+  market.conditionId,
+  isYes = true
+)
+```
+
+### Balance Operations
+
+#### assetsBalance
+
+```nim
+proc assetsBalance(client: PolyculeClient): Future[Opt[array[2, EvmUInt256]]]
+```
+
+Fetches the balance of both Yes and No outcome tokens for the current market.
+
+**Returns:** Array containing [Yes balance, No balance]
+
+**Example:**
+```nim
+let balances = await client.assetsBalance()
+echo "Yes tokens: ", balances.get()[0]
+echo "No tokens: ", balances.get()[1]
+```
+
+### Approval Operations
+
+#### ctfApproveExchange
+
+```nim
+proc ctfApproveExchange(client: PolyculeClient): Future[Opt[void]]
+```
+
+Approves the exchange contract to transfer CTF tokens on behalf of the user.
+
+**Returns:** `Opt[void].ok()` on success, `Opt[void].err()` on failure
+
+**Example:**
+```nim
+let result = await client.ctfApproveExchange()
+if result.isOk():
+  echo "Exchange approved for CTF tokens"
+```
+
+#### ctfRevokeExchangeApproval
+
+```nim
+proc ctfRevokeExchangeApproval(client: PolyculeClient): Future[Opt[void]]
+```
+
+Revokes the exchange contract's approval to transfer CTF tokens.
+
+**Example:**
+```nim
+discard await client.ctfRevokeExchangeApproval()
+```
+
+#### getCTFExchangeApproval
+
+```nim
+proc getCTFExchangeApproval(client: PolyculeClient): Future[Opt[bool]]
+```
+
+Checks if the exchange contract is approved to transfer CTF tokens.
+
+**Returns:** `true` if approved, `false` otherwise
+
+**Example:**
+```nim
+let approved = await client.getCTFExchangeApproval()
+if not approved.get():
+  discard await client.ctfApproveExchange()
+```
+
+### Position Management
+
+#### splitPosition
+
+```nim
+proc splitPosition(client: PolyculeClient, amount: EvmUInt256): Future[Opt[void]]
+```
+
+Splits collateral tokens into conditional outcome tokens (Yes and No).
+
+**Parameters:**
+- `amount`: Amount of collateral to split (in base units)
+
+**Returns:** `Opt[void].ok()` on success
+
+**Example:**
+```nim
+# Split 100 USDC into Yes and No tokens
+let result = await client.splitPosition(usdc(100))
+if result.isOk():
+  echo "Position split successful"
+```
+
+**Gas:** ~300,000
+
+#### mergePositions
+
+```nim
+proc mergePositions(client: PolyculeClient, amount: EvmUInt256): Future[Opt[void]]
+```
+
+Merges equal amounts of Yes and No tokens back into collateral.
+
+**Parameters:**
+- `amount`: Amount of each outcome token to merge (in base units)
+
+**Returns:** `Opt[void].ok()` on success
+
+**Example:**
+```nim
+# Merge 50 Yes + 50 No tokens into 50 USDC
+let result = await client.mergePositions(share(50))
+if result.isOk():
+  echo "Positions merged successfully"
+```
+
+**Gas:** ~300,000
+
+#### redeemPositions
+
+```nim
+proc redeemPositions(client: PolyculeClient): Future[Opt[void]]
+```
+
+Redeems winning outcome tokens for collateral after market resolution.
+
+**Returns:** `Opt[void].ok()` on success
+
+**Example:**
+```nim
+let result = await client.redeemPositions()
+if result.isOk():
+  echo "Positions redeemed successfully"
+```
+
+**Gas:** ~300,000
+
+## CTF Exchange
+
+The CTF Exchange contract handles order matching and execution. Located in `polycule/evm/ctf_exchange.nim`.
+
+### Contract Interface
+
+```nim
+contract PolyFactoryHelper:
+  proc getPolyProxyWalletAddress(signerAddress: Address): Address
+  proc getSafeAddress(signerAddress: Address): Address
+```
+
+### Proxy Wallet Operations
+
+#### getPolyProxyWalletAddress
+
+```nim
+proc getPolyProxyWalletAddress(web3: Web3, address: Address): Future[Opt[Address]]
+```
+
+Gets the Poly Proxy wallet address for a signer.
+
+**Parameters:**
+- `web3`: Web3 connection
+- `address`: Signer address
+
+**Returns:** Proxy wallet address
+
+#### getSafeAddress
+
+```nim
+proc getSafeAddress(web3: Web3, address: Address): Future[Opt[Address]]
+```
+
+Gets the Gnosis Safe address for a signer.
+
+**Parameters:**
+- `web3`: Web3 connection
+- `address`: Signer address
+
+**Returns:** Safe wallet address
+
+#### getProxyAddress
+
+```nim
+proc getProxyAddress(client: PolyculeClient): Future[Opt[Address]]
+```
+
+Gets the appropriate proxy address based on the wallet's signature type.
+
+**Returns:** Proxy address for POLY_PROXY or POLY_GNOSIS_SAFE wallets
+
+**Example:**
+```nim
+if client.user.get().wallet.signatureType != EOA:
+  let proxyAddr = await client.getProxyAddress()
+  echo "Proxy address: ", proxyAddr.get()
+```
+
+## ERC20 Collateral
+
+The ERC20 interface handles USDC collateral token operations. Located in `polycule/evm/erc20.nim`.
+
+### Contract Interface
+
+```nim
+contract CollateralToken:
+  proc balanceOf(account: Address): EvmUInt256
+  proc approve(spender: Address, value: EvmUInt256): bool
+```
+
+### Balance Operations
+
+#### collateralBalance
+
+```nim
+proc collateralBalance(client: PolyculeClient): Future[Opt[EvmUInt256]]
+```
+
+Fetches the user's USDC collateral balance.
+
+**Returns:** Balance in base units (6 decimals)
+
+**Example:**
+```nim
+let balance = await client.collateralBalance()
+echo "USDC balance: ", balance.get()
+```
+
+### Approval Operations
+
+#### collateralApproveExchange
+
+```nim
+proc collateralApproveExchange(
+  client: PolyculeClient,
+  value: EvmUInt256
+): Future[Opt[void]]
+```
+
+Approves the exchange contract to spend USDC collateral.
+
+**Parameters:**
+- `value`: Amount to approve (in base units)
+
+**Returns:** `Opt[void].ok()` on success
+
+**Example:**
+```nim
+# Approve 1000 USDC for trading
+let result = await client.collateralApproveExchange(usdc(1000))
+if result.isOk():
+  echo "Exchange approved for USDC"
+```
+
+**Gas:** ~100,000
+
+## Usage Example
+
+```nim
+import polycule
+
+proc trade() {.async.} =
+  let client = newPolyculeClient()
+  
+  # Check and approve CTF tokens
+  let ctfApproved = await client.getCTFExchangeApproval()
+  if not ctfApproved.get():
+    discard await client.ctfApproveExchange()
+  
+  # Check USDC balance
+  let balance = await client.collateralBalance()
+  echo "USDC available: ", balance.get()
+  
+  # Split 100 USDC into outcome tokens
+  discard await client.splitPosition(usdc(100))
+  
+  # Check outcome token balances
+  let assets = await client.assetsBalance()
+  echo "Yes tokens: ", assets.get()[0]
+  echo "No tokens: ", assets.get()[1]
+  
+  # ... place orders ...
+  
+  # Merge remaining positions back to USDC
+  discard await client.mergePositions(share(50))
+
+waitFor trade()
+```
+
+## See Also
+
+- [EVM Overview](/api/evm/overview) - Core types and utilities
+- [EIP-712 Signing](/api/evm/eip712) - Typed data signing for orders

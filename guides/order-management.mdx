@@ -1,0 +1,639 @@
+---
+title: Order Management
+description: Create, query, cancel, and manage orders on the Polymarket CLOB
+---
+
+The Polycule SDK provides comprehensive order management capabilities, including creating signed orders, querying open orders, viewing order details, and canceling orders.
+
+## Creating Orders
+
+Orders can be created at two levels:
+1. **High-level**: Use `buy()` and `sell()` (see [Trading guide](/guides/trading))
+2. **Low-level**: Use `createOrder()` for manual signing and posting
+
+### Manual Order Creation
+
+For advanced use cases, you can manually create and sign orders:
+
+```nim src/polycule/clob/l1_methods.nim
+proc createOrder*(
+  client: PolyculeClient,
+  order: UserOrder,
+  options: CreateOrderOptions
+): Opt[SignedOrder]
+```
+
+<Steps>
+  <Step title="Define the Order">
+    Create a `UserOrder` with your order parameters:
+
+    ```nim
+    let order = UserOrder(
+      tokenID: "123456789",              # Token ID for the outcome
+      price: Price(0.65),                 # Price between 0.0-1.0
+      size: Size(100.0),                  # Number of tokens
+      side: BUY,                          # BUY or SELL
+      feeRateBps: Opt.some(100'u32),     # Fee rate (100 bps = 1%)
+      nonce: Opt.some(evmUint256(0)),    # Nonce for uniqueness
+      expiration: Opt.some(Timestamp(0)), # 0 = no expiration
+      taker: Opt.some(default(Address))   # Zero address = any taker
+    )
+    ```
+  </Step>
+
+  <Step title="Specify Creation Options">
+    ```nim
+    let options = CreateOrderOptions(
+      tickSize: TICK_0_01,  # Minimum price increment
+      negRisk: false        # Whether negative risk is enabled
+    )
+    ```
+  </Step>
+
+  <Step title="Create Signed Order">
+    ```nim
+    let signedOrder = client.createOrder(order, options)
+    
+    if signedOrder.isSome():
+      echo "Order signed successfully!"
+      # Now post the order
+      let result = await client.postOrder(signedOrder.value())
+    else:
+      echo "Order validation failed"
+    ```
+  </Step>
+</Steps>
+
+### Order Signing Process
+
+The SDK uses EIP-712 typed data signing:
+
+```nim src/polycule/clob/l1_methods.nim
+proc buildOrderSignature*(
+  client: PolyculeClient,
+  order: UserOrder,
+  salt: EvmUInt256,
+  makerAmount: EvmUInt256,
+  takerAmount: EvmUInt256
+): string =
+  let
+    funder = client.user.value().wallet.funder
+    privateKey = client.user.value().wallet.signer.privateKey.value()
+    signer = privateKey.toPublicKey().to(Address)
+    domain = buildEIP712Domain(
+      name = "Polymarket CTF Exchange",
+      version = "1",
+      chainId = CHAIN_ID,
+      verifyingContract = client.currentMarket.value().contractConfig().exchange
+    )
+    orderStruct = buildEIP712Struct(
+      "Order",
+      # ... order fields
+    )
+
+  return privateKey.signTypedData(domain, orderStruct)
+```
+
+### Amount Calculation
+
+The SDK automatically calculates proper maker/taker amounts based on tick size:
+
+```nim src/polycule/clob/common.nim
+proc getOrderRawAmounts*(
+  order: UserOrder,
+  config: RoundConfig
+): tuple[makerAmount: UInt256, takerAmount: UInt256] =
+  let roundedPrice = roundValue(float(order.price), config.price, ROUND_NORMAL)
+
+  if order.side == BUY:
+    # BUY: taker amount is shares, maker amount is USDC
+    let
+      roundedTakerAmount = roundValue(float(order.size), config.size, ROUND_DOWN)
+      roundedMakerAmount = roundValue(
+        roundedTakerAmount * roundedPrice,
+        config.amount,
+        ROUND_UP
+      )
+    result.takerAmount = share(roundedTakerAmount)
+    result.makerAmount = usdc(roundedMakerAmount)
+  else:
+    # SELL: maker amount is shares, taker amount is USDC
+    let
+      roundedMakerAmount = roundValue(float(order.size), config.size, ROUND_DOWN)
+      roundedTakerAmount = roundValue(
+        roundedMakerAmount * roundedPrice,
+        config.amount,
+        ROUND_DOWN
+      )
+    result.makerAmount = share(roundedMakerAmount)
+    result.takerAmount = usdc(roundedTakerAmount)
+```
+
+## Posting Orders
+
+### Single Order
+
+Post a pre-signed order to the CLOB:
+
+```nim src/polycule/clob/l2_methods.nim
+proc postOrder*(
+  client: PolyculeClient,
+  signedOrder: SignedOrder,
+  postOptions = PostOrderOptions(),
+  deferExec: bool = false
+): Future[Result[OrderResponse, string]]
+```
+
+**Example:**
+
+```nim
+let
+  signedOrder = client.createOrder(order, options).value()
+  result = await client.postOrder(
+    signedOrder,
+    PostOrderOptions(orderType: GTC, postOnly: true)
+  )
+
+if result.isOk():
+  let response = result.value()
+  echo "Order ID: ", response.orderID.get()
+  echo "Status: ", response.status.get()
+else:
+  echo "Error: ", result.error()
+```
+
+### Batch Orders
+
+Post up to 15 orders in a single request:
+
+```nim src/polycule/clob/l2_methods.nim
+proc postOrders*(
+  client: PolyculeClient,
+  signedOrders: seq[SignedOrder],
+  options: PostOrderOptions = PostOrderOptions()
+): Future[Result[seq[OrderResponse], string]]
+```
+
+**Example:**
+
+```nim
+var signedOrders: seq[SignedOrder]
+
+# Create multiple orders
+for price in [0.60, 0.61, 0.62, 0.63, 0.64]:
+  let order = UserOrder(
+    tokenID: tokenId,
+    price: Price(price),
+    size: Size(10.0),
+    side: BUY,
+    # ... other fields
+  )
+  let signed = client.createOrder(order, options)
+  if signed.isSome():
+    signedOrders.add(signed.value())
+
+# Post all orders at once
+let result = await client.postOrders(
+  signedOrders,
+  PostOrderOptions(orderType: GTC, postOnly: true)
+)
+
+if result.isOk():
+  for response in result.value():
+    echo "Order ID: ", response.orderID.get()
+```
+
+<Warning>
+You can post a maximum of **15 orders** in a single batch request.
+</Warning>
+
+## Querying Orders
+
+### Get Single Order
+
+Retrieve details for a specific order by ID:
+
+```nim src/polycule/clob/l2_methods.nim
+proc getOrder*(
+  client: PolyculeClient,
+  orderId: string
+): Future[Result[OpenOrderResponse, string]]
+```
+
+**Example:**
+
+```nim
+let result = await client.getOrder("0x123abc...")
+
+if result.isOk():
+  let order = result.value()
+  echo "Order ID: ", order.id.get()
+  echo "Status: ", order.status.get()
+  echo "Side: ", order.side.get()
+  echo "Price: ", order.price.get()
+  echo "Original Size: ", order.original_size.get()
+  echo "Size Matched: ", order.size_matched.get()
+  echo "Asset ID: ", order.asset_id.get()
+else:
+  echo "Error: ", result.error()
+```
+
+### Get Open Orders
+
+Query all your open orders with optional filters:
+
+```nim src/polycule/clob/l2_methods.nim
+proc getOpenOrders*(
+  client: PolyculeClient,
+  params: OpenOrderParams = OpenOrderParams()
+): Future[Result[OpenOrdersResponse, string]]
+```
+
+**Filter Parameters:**
+
+```nim src/polycule/global.nim
+type OpenOrderParams* = object
+  id*: Opt[string]        # Filter by order ID
+  market*: Opt[string]    # Filter by market condition ID
+  asset_id*: Opt[string]  # Filter by asset/token ID
+```
+
+**Examples:**
+
+<Tabs>
+  <Tab title="All Open Orders">
+    ```nim
+    let result = await client.getOpenOrders()
+    
+    if result.isOk():
+      let response = result.value()
+      echo "Total orders: ", response.count.get()
+      
+      for order in response.data.get():
+        echo "Order ", order.id.get(), ": ",
+          order.side.get(), " ",
+          order.original_size.get(), " @ ",
+          order.price.get()
+    ```
+  </Tab>
+
+  <Tab title="Filter by Market">
+    ```nim
+    let result = await client.getOpenOrders(
+      OpenOrderParams(
+        market: Opt.some("0x123abc...")
+      )
+    )
+    
+    if result.isOk():
+      echo "Orders in this market: ", result.value().count.get()
+    ```
+  </Tab>
+
+  <Tab title="Filter by Asset">
+    ```nim
+    let result = await client.getOpenOrders(
+      OpenOrderParams(
+        asset_id: Opt.some("123456789")
+      )
+    )
+    
+    if result.isOk():
+      let orders = result.value().data.get()
+      for order in orders:
+        echo "Asset ", order.asset_id.get(), ": ",
+          order.original_size.get(), " @ ",
+          order.price.get()
+    ```
+  </Tab>
+</Tabs>
+
+### OpenOrderResponse Fields
+
+```nim src/polycule/global.nim
+type OpenOrderResponse* = object
+  id*: Opt[string]                  # Order ID
+  status*: Opt[OrderStatus]         # LIVE, FILLED, CANCELED, etc.
+  owner*: Opt[string]               # Owner address
+  maker_address*: Opt[string]       # Maker address
+  market*: Opt[string]              # Market condition ID
+  asset_id*: Opt[string]            # Token ID
+  side*: Opt[Side]                  # BUY or SELL
+  original_size*: Opt[Size]         # Original order size
+  size_matched*: Opt[Size]          # Amount matched
+  price*: Opt[Price]                # Order price
+  associate_trades*: Opt[seq[string]] # Associated trade IDs
+  outcome*: Opt[string]             # Outcome name
+  created_at*: Opt[Timestamp]       # Creation timestamp
+  expiration*: Opt[Timestamp]       # Expiration timestamp
+  order_type*: Opt[OrderType]       # GTC, FOK, FAK, GTD
+```
+
+## Canceling Orders
+
+### Cancel Single Order
+
+Cancel a specific order by ID:
+
+```nim src/polycule/clob/l2_methods.nim
+proc cancelOrder*(
+  client: PolyculeClient,
+  orderId: string
+): Future[Result[CancelOrdersResponse, string]]
+```
+
+**Example:**
+
+```nim
+let result = await client.cancelOrder("0x123abc...")
+
+if result.isOk():
+  let response = result.value()
+  echo "Canceled: ", response.canceled.get()
+  echo "Not canceled: ", response.not_canceled.get()
+else:
+  echo "Error: ", result.error()
+```
+
+### Cancel Multiple Orders
+
+Cancel specific orders by providing their IDs:
+
+```nim src/polycule/clob/l2_methods.nim
+proc cancelAll*(
+  client: PolyculeClient,
+  orderIds: seq[string] = @[]
+): Future[Result[CancelOrdersResponse, string]]
+```
+
+**Examples:**
+
+<Tabs>
+  <Tab title="Cancel Specific Orders">
+    ```nim
+    let result = await client.cancelAll(@[
+      "0x123abc...",
+      "0x456def...",
+      "0x789ghi..."
+    ])
+
+    if result.isOk():
+      let response = result.value()
+      echo "Successfully canceled: ", response.canceled.get().len
+      
+      if response.not_canceled.get().len > 0:
+        echo "Failed to cancel:"
+        for (orderId, reason) in response.not_canceled.get():
+          echo "  ", orderId, ": ", reason
+    ```
+  </Tab>
+
+  <Tab title="Cancel All Orders">
+    ```nim
+    # Pass empty array to cancel all open orders
+    let result = await client.cancelAll(@[])
+
+    if result.isOk():
+      let response = result.value()
+      echo "Canceled all ", response.canceled.get().len, " orders"
+    else:
+      echo "Error: ", result.error()
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+Passing an **empty array** to `cancelAll()` will cancel **all** your open orders across all markets.
+</Warning>
+
+### CancelOrdersResponse
+
+```nim src/polycule/global.nim
+type CancelOrdersResponse* = object
+  canceled*: Opt[seq[string]]           # IDs of canceled orders
+  not_canceled*: Opt[seq[(string, string)]] # (orderID, reason) tuples
+```
+
+## Trade History
+
+Query your trade history with optional filters:
+
+```nim src/polycule/clob/l2_methods.nim
+proc getTrades*(
+  client: PolyculeClient,
+  params: TradeParams = TradeParams()
+): Future[Result[seq[TradeResponse], string]]
+```
+
+### Trade Parameters
+
+```nim src/polycule/global.nim
+type TradeParams* = object
+  id*: Opt[string]             # Filter by trade ID
+  maker_address*: Opt[string]  # Filter by maker address
+  market*: Opt[string]         # Filter by market ID
+  asset_id*: Opt[string]       # Filter by asset ID
+  before*: Opt[string]         # Pagination cursor (before)
+  after*: Opt[string]          # Pagination cursor (after)
+```
+
+### Examples
+
+<Tabs>
+  <Tab title="All Trades">
+    ```nim
+    let result = await client.getTrades()
+
+    if result.isOk():
+      for trade in result.value():
+        echo "Trade ", trade.id.get(), ":"
+        echo "  Side: ", trade.side.get()
+        echo "  Size: ", trade.size.get()
+        echo "  Price: ", trade.price.get()
+        echo "  Status: ", trade.status.get()
+        echo "  Tx Hash: ", trade.transaction_hash.get()
+    ```
+  </Tab>
+
+  <Tab title="Filter by Market">
+    ```nim
+    let result = await client.getTrades(
+      TradeParams(
+        market: Opt.some("0x123abc...")
+      )
+    )
+
+    if result.isOk():
+      echo "Trades in market: ", result.value().len
+    ```
+  </Tab>
+
+  <Tab title="Filter by Asset">
+    ```nim
+    let result = await client.getTrades(
+      TradeParams(
+        asset_id: Opt.some("123456789")
+      )
+    )
+
+    if result.isOk():
+      var totalVolume: float = 0.0
+      for trade in result.value():
+        totalVolume += float(trade.size.get())
+      echo "Total volume: ", totalVolume
+    ```
+  </Tab>
+</Tabs>
+
+### TradeResponse Fields
+
+```nim src/polycule/global.nim
+type TradeResponse* = object
+  id*: Opt[string]                      # Trade ID
+  taker_order_id*: Opt[string]          # Taker order ID
+  market*: Opt[string]                  # Market condition ID
+  asset_id*: Opt[string]                # Asset/token ID
+  side*: Opt[Side]                      # BUY or SELL
+  size*: Opt[Size]                      # Trade size
+  fee_rate_bps*: Opt[uint32]            # Fee rate in basis points
+  price*: Opt[Price]                    # Trade price
+  status*: Opt[TradeExecutionStatus]    # MATCHED, MINED, CONFIRMED, etc.
+  match_time*: Opt[string]              # Match time (ISO string)
+  last_update*: Opt[string]             # Last update time
+  outcome*: Opt[string]                 # Outcome name
+  owner*: Opt[string]                   # Owner address
+  maker_address*: Opt[string]           # Maker address
+  maker_orders*: Opt[seq[MakerOrder]]   # Maker order details
+  transaction_hash*: Opt[string]        # Blockchain tx hash
+  trader_side*: Opt[TraderSide]         # TAKER or MAKER
+```
+
+## Complete Example
+
+Here's a complete order management workflow:
+
+```nim
+import polycule
+import std/[os, uri, asyncdispatch]
+
+proc main() {.async.} =
+  # Initialize client
+  let
+    RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+    PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+    client = await newPolycule(
+      PRIVATE_KEY,
+      PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+    )
+  
+  # Set market
+  await client.setMarket("btc-15min-2024-03-15")
+  
+  # Place multiple orders
+  echo "Placing orders..."
+  let buyResult = await client.buy(
+    outcomeYes = true,
+    size = Size(10.0),
+    price = Price(0.60)
+  )
+  
+  var orderId: string
+  if buyResult.isOk():
+    orderId = buyResult.value().orderID.get()
+    echo "Order placed: ", orderId
+  
+  # Query open orders
+  echo "\nQuerying open orders..."
+  let openOrders = await client.getOpenOrders()
+  if openOrders.isOk():
+    let response = openOrders.value()
+    echo "Total open orders: ", response.count.get()
+    
+    for order in response.data.get():
+      echo "  ", order.id.get(), ": ",
+        order.side.get(), " ",
+        order.original_size.get(), " @ ",
+        order.price.get(),
+        " (", order.status.get(), ")"
+  
+  # Get specific order details
+  echo "\nGetting order details..."
+  let orderDetails = await client.getOrder(orderId)
+  if orderDetails.isOk():
+    let order = orderDetails.value()
+    echo "Order ", order.id.get()
+    echo "  Status: ", order.status.get()
+    echo "  Matched: ", order.size_matched.get(), " / ",
+      order.original_size.get()
+  
+  # Get trade history
+  echo "\nGetting trade history..."
+  let trades = await client.getTrades()
+  if trades.isOk():
+    echo "Total trades: ", trades.value().len
+    for trade in trades.value():
+      echo "  ", trade.id.get(), ": ",
+        trade.side.get(), " ",
+        trade.size.get(), " @ ",
+        trade.price.get(),
+        " (", trade.status.get(), ")"
+  
+  # Cancel specific order
+  echo "\nCanceling order..."
+  let cancelResult = await client.cancelOrder(orderId)
+  if cancelResult.isOk():
+    echo "Canceled: ", cancelResult.value().canceled.get()
+
+when isMainModule:
+  waitFor main()
+```
+
+## Authentication
+
+All L2 order management methods require HMAC-SHA256 authentication:
+
+```nim src/polycule/clob/l2_methods.nim
+proc createL2Headers*(
+  client: PolyculeClient,
+  httpMethod: string,
+  requestUrl: Uri,
+  body: string = ""
+): Future[Opt[HttpTable]] {.async.} =
+  let
+    serverTimestamp = (await getServerTimestamp()).get()
+    requestPath = fmt"{requestUrl.path}?{requestUrl.query}"
+    address = client.user.value().wallet.signer.privateKey.value()
+      .toPublicKey().to(Address)
+    signature = buildHmacSignature(
+      client.user.value().wallet.auth.value().secret.value(),
+      serverTimestamp,
+      httpMethod,
+      requestPath,
+      body
+    )
+  
+  return Opt.some(HttpTable.init([
+    ("POLY_ADDRESS", $address),
+    ("POLY_SIGNATURE", signature),
+    ("POLY_TIMESTAMP", $(serverTimestamp)),
+    ("POLY_API_KEY", client.user.value().wallet.auth.value().apiKey.value()),
+    ("POLY_PASSPHRASE", client.user.value().wallet.auth.value().passphrase.value()),
+    ("Content-Type", "application/json")
+  ]))
+```
+
+The SDK handles authentication automatically using your API credentials.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trading" icon="chart-line" href="/guides/trading">
+    Learn how to place buy and sell orders
+  </Card>
+  <Card title="Market Data" icon="book" href="/guides/market-data">
+    Fetch order books and market information
+  </Card>
+  <Card title="WebSockets" icon="satellite-dish" href="/guides/websockets">
+    Subscribe to real-time order updates
+  </Card>
+</CardGroup>

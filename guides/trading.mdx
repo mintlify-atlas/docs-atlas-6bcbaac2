@@ -1,0 +1,421 @@
+---
+title: Trading
+description: Learn how to place buy and sell orders using the Polycule Nim SDK
+---
+
+The Polycule SDK provides convenient `buy()` and `sell()` functions for placing orders on prediction markets. These functions handle order creation, signing, and submission automatically.
+
+## Quick Start
+
+<Steps>
+  <Step title="Initialize the Client">
+    First, create a Polycule client with your private key and RPC URL:
+
+    ```nim
+    import polycule
+    import std/[os, uri]
+
+    let
+      RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+      PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+      client = await newPolycule(PRIVATE_KEY, PolyculeConfig(rpcUrl: Opt.some(RPC_URL)))
+    ```
+  </Step>
+
+  <Step title="Set the Market">
+    Before trading, you must set the market you want to trade on:
+
+    ```nim
+    # Set market by slug (e.g., crypto price markets)
+    let marketSlug = getCryptoCurrentMarketSlug("btc", MINUTE15)
+    await client.setMarket(marketSlug)
+    ```
+  </Step>
+
+  <Step title="Place Orders">
+    Now you can place buy and sell orders:
+
+    ```nim
+    # Buy 10 YES tokens at $0.60
+    let buyResult = await client.buy(
+      outcomeYes = true,
+      size = Size(10.0),
+      price = Price(0.60)
+    )
+
+    # Sell 5 NO tokens at $0.45
+    let sellResult = await client.sell(
+      outcomeYes = false,
+      size = Size(5.0),
+      price = Price(0.45)
+    )
+    ```
+  </Step>
+</Steps>
+
+## Buy Orders
+
+The `buy()` function places a buy order for outcome tokens (YES or NO).
+
+### Function Signature
+
+```nim src/polycule.nim
+proc buy*(
+  client: PolyculeClient,
+  outcomeYes: bool,
+  size: Size,
+  price: Price,
+  postOrderOptions = PostOrderOptions(orderType: OrderType.GTC, postOnly: true)
+): Future[Result[OrderResponse, string]]
+```
+
+### Parameters
+
+<ParamField path="client" type="PolyculeClient" required>
+  The initialized Polycule client instance
+</ParamField>
+
+<ParamField path="outcomeYes" type="bool" required>
+  - `true` to buy YES tokens
+  - `false` to buy NO tokens
+</ParamField>
+
+<ParamField path="size" type="Size" required>
+  Number of outcome tokens to buy (as a float value)
+</ParamField>
+
+<ParamField path="price" type="Price" required>
+  Price per token, between 0.0 and 1.0 (e.g., 0.60 = $0.60)
+</ParamField>
+
+<ParamField path="postOrderOptions" type="PostOrderOptions" default="GTC, postOnly: true">
+  Order execution options (see [Order Options](#order-options))
+</ParamField>
+
+### Example
+
+```nim
+# Buy 100 YES tokens at $0.75
+let result = await client.buy(
+  outcomeYes = true,
+  size = Size(100.0),
+  price = Price(0.75),
+  postOrderOptions = PostOrderOptions(
+    orderType = GTC,
+    postOnly = true
+  )
+)
+
+if result.isOk():
+  echo "Order placed! ID: ", result.value().orderID
+else:
+  echo "Order failed: ", result.error()
+```
+
+## Sell Orders
+
+The `sell()` function places a sell order for outcome tokens.
+
+### Function Signature
+
+```nim src/polycule.nim
+proc sell*(
+  client: PolyculeClient,
+  outcomeYes: bool,
+  size: Size,
+  price: Price,
+  postOrderOptions = PostOrderOptions(orderType: OrderType.GTC, postOnly: true)
+): Future[Result[OrderResponse, string]]
+```
+
+### Parameters
+
+Parameters are identical to `buy()` - the function automatically determines the order side.
+
+### Example
+
+```nim
+# Sell 50 NO tokens at $0.35
+let result = await client.sell(
+  outcomeYes = false,
+  size = Size(50.0),
+  price = Price(0.35)
+)
+
+if result.isOk():
+  let response = result.value()
+  echo "Order ID: ", response.orderID.get()
+  echo "Status: ", response.status.get()
+  echo "Success: ", response.success.get()
+else:
+  echo "Error: ", result.error()
+```
+
+## Order Options
+
+Both `buy()` and `sell()` accept `PostOrderOptions` to control order execution behavior.
+
+### PostOrderOptions
+
+```nim src/polycule/global.nim
+type PostOrderOptions* = object
+  orderType*: OrderType    # Order execution type
+  postOnly*: bool          # Post-only flag
+```
+
+### Order Types
+
+<Tabs>
+  <Tab title="GTC (Good Till Canceled)">
+    The default order type. Order stays active until filled or manually canceled.
+
+    ```nim
+    await client.buy(
+      outcomeYes = true,
+      size = Size(10.0),
+      price = Price(0.60),
+      postOrderOptions = PostOrderOptions(
+        orderType = GTC,
+        postOnly = false
+      )
+    )
+    ```
+  </Tab>
+
+  <Tab title="FOK (Fill or Kill)">
+    Order must be filled immediately and completely, or it's canceled.
+
+    ```nim
+    await client.buy(
+      outcomeYes = true,
+      size = Size(10.0),
+      price = Price(0.60),
+      postOrderOptions = PostOrderOptions(
+        orderType = FOK,
+        postOnly = false
+      )
+    )
+    ```
+  </Tab>
+
+  <Tab title="FAK (Fill and Kill)">
+    Fill any amount immediately, cancel the remainder.
+
+    ```nim
+    await client.sell(
+      outcomeYes = false,
+      size = Size(20.0),
+      price = Price(0.40),
+      postOrderOptions = PostOrderOptions(
+        orderType = FAK,
+        postOnly = false
+      )
+    )
+    ```
+  </Tab>
+
+  <Tab title="GTD (Good Till Date)">
+    Order expires at a specified time.
+
+    ```nim
+    await client.buy(
+      outcomeYes = true,
+      size = Size(15.0),
+      price = Price(0.55),
+      postOrderOptions = PostOrderOptions(
+        orderType = GTD,
+        postOnly = true
+      )
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Post-Only Orders
+
+<Info>
+Post-only orders are only supported for **GTC** and **GTD** order types.
+</Info>
+
+When `postOnly = true`, the order will be rejected if it would immediately match with an existing order. This ensures your order is added to the order book as a maker order, avoiding taker fees.
+
+```nim
+# This order will only be placed if it doesn't immediately match
+await client.buy(
+  outcomeYes = true,
+  size = Size(25.0),
+  price = Price(0.70),
+  postOrderOptions = PostOrderOptions(
+    orderType = GTC,
+    postOnly = true  # Ensures maker order
+  )
+)
+```
+
+## Tick Sizes
+
+The SDK automatically fetches the correct tick size for each market. Tick sizes determine the minimum price increment:
+
+| Tick Size | Minimum Increment | Example Prices |
+|-----------|-------------------|----------------|
+| `TICK_0_1` | $0.10 | 0.10, 0.20, 0.30, ... |
+| `TICK_0_01` | $0.01 | 0.01, 0.02, 0.03, ... |
+| `TICK_0_001` | $0.001 | 0.001, 0.002, 0.003, ... |
+| `TICK_0_0001` | $0.0001 | 0.0001, 0.0002, 0.0003, ... |
+
+The `buy()` and `sell()` functions automatically:
+
+1. Fetch the current tick size via `getTickSize(tokenId)`
+2. Round your price to the nearest valid tick
+3. Calculate proper maker/taker amounts
+
+```nim src/polycule.nim
+# Automatic tick size fetching (from buy() implementation)
+proc fetchTickSizeTask(): Future[Result[Ticksize, string]] {.async: (raises: []).} =
+  try:
+    return ok((await getTickSize(tokenId)).value().minimumTickSize.value())
+  except:
+    return err("CLOB_GET_TICKSIZE FAILED")
+
+let tickSize = await retryAsync(fetchTickSizeTask, "CLOB_GET_TICKSIZE")
+```
+
+## Fee Rates
+
+Fee rates are specified in basis points (bps), where 100 bps = 1%.
+
+The SDK automatically fetches current fee rates:
+
+```nim src/polycule.nim
+proc fetchFeeRateBpsTask(): Future[Result[uint32, string]] {.async: (raises: []).} =
+  try:
+    return ok((await getFeeRateBps(tokenId)).value().baseFee.value())
+  except:
+    return err("CLOB_GET_FEE_RATE_BPS FAILED")
+
+let feeRateBps = await retryAsync(fetchFeeRateBpsTask, "CLOB_GET_FEE_RATE_BPS")
+```
+
+<Note>
+Typical fee rates on Polymarket are 100 bps (1%) for takers and 0 bps for makers.
+</Note>
+
+## Order Responses
+
+Both `buy()` and `sell()` return `Result[OrderResponse, string]`:
+
+```nim src/polycule/global.nim
+type OrderResponse* = object
+  success*: Opt[bool]                    # Whether submission succeeded
+  errorMsg*: Opt[OrderErrorMessage]      # Error message if failed
+  orderID*: Opt[string]                  # Unique order ID
+  transactionsHashes*: Opt[seq[string]]  # Transaction hashes
+  status*: Opt[OrderInsertStatus]        # Order execution status
+  takingAmount*: Opt[Size]               # Amount being taken
+  makingAmount*: Opt[Size]               # Amount being made
+```
+
+### Handling Responses
+
+```nim
+let result = await client.buy(
+  outcomeYes = true,
+  size = Size(10.0),
+  price = Price(0.60)
+)
+
+if result.isOk():
+  let response = result.value()
+  
+  if response.success.get():
+    echo "Order placed successfully!"
+    echo "Order ID: ", response.orderID.get()
+    echo "Status: ", response.status.get()
+    
+    # Check if order was matched immediately
+    if response.status.get() == MATCHED:
+      echo "Order matched with existing order"
+    elif response.status.get() == LIVE:
+      echo "Order is now resting on the book"
+  else:
+    echo "Order submission failed: ", response.errorMsg.get()
+else:
+  echo "Error: ", result.error()
+```
+
+## Complete Example
+
+Here's a complete trading example:
+
+```nim
+import polycule
+import std/[os, uri, asyncdispatch]
+
+proc main() {.async.} =
+  # Initialize client
+  let
+    RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+    PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+    client = await newPolycule(
+      PRIVATE_KEY,
+      PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+    )
+  
+  # Set market
+  let marketSlug = "btc-15min-2024-03-15"
+  await client.setMarket(marketSlug)
+  echo "Trading on market: ", marketSlug
+  
+  # Place a buy order for YES tokens
+  echo "Placing buy order..."
+  let buyResult = await client.buy(
+    outcomeYes = true,
+    size = Size(50.0),
+    price = Price(0.65),
+    postOrderOptions = PostOrderOptions(
+      orderType = GTC,
+      postOnly = true
+    )
+  )
+  
+  if buyResult.isOk():
+    let response = buyResult.value()
+    echo "Buy order placed! ID: ", response.orderID.get()
+  else:
+    echo "Buy order failed: ", buyResult.error()
+  
+  # Place a sell order for NO tokens
+  echo "Placing sell order..."
+  let sellResult = await client.sell(
+    outcomeYes = false,
+    size = Size(30.0),
+    price = Price(0.40),
+    postOrderOptions = PostOrderOptions(
+      orderType = GTC,
+      postOnly = false
+    )
+  )
+  
+  if sellResult.isOk():
+    let response = sellResult.value()
+    echo "Sell order placed! ID: ", response.orderID.get()
+  else:
+    echo "Sell order failed: ", sellResult.error()
+
+when isMainModule:
+  waitFor main()
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Order Management" icon="list" href="/guides/order-management">
+    Learn how to query, cancel, and manage your orders
+  </Card>
+  <Card title="Market Data" icon="chart-line" href="/guides/market-data">
+    Fetch order books and market information
+  </Card>
+  <Card title="WebSockets" icon="satellite-dish" href="/guides/websockets">
+    Subscribe to real-time price and order updates
+  </Card>
+</CardGroup>

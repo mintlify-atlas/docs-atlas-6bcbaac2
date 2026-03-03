@@ -1,0 +1,507 @@
+---
+title: Market Data
+description: Fetch order books, market information, and price data from Polymarket
+---
+
+The Polycule SDK provides methods to fetch market data including order books, market details, tick sizes, and fee rates.
+
+## Market Information
+
+Retrieve detailed information about a specific market using the Gamma API.
+
+### Get Market by Slug
+
+```nim src/polycule/gamma/gamma.nim
+proc getMarket*(
+  slug: string,
+  includeTag = false
+): Future[Opt[GammaMarketResponse]]
+```
+
+**Example:**
+
+```nim
+import polycule
+
+let result = await getMarket("btc-15min-2024-03-15")
+
+if result.isSome():
+  let market = result.value()
+  echo "Market ID: ", market.id.get()
+  echo "Question: ", market.question.get()
+  echo "Condition ID: ", market.conditionId.get()
+  echo "Slug: ", market.slug.get()
+  echo "Neg Risk: ", market.negRisk.get()
+else:
+  echo "Market not found"
+```
+
+### GammaMarketResponse Fields
+
+```nim src/polycule/global.nim
+type GammaMarketResponse* = object
+  id*: Opt[string]           # Market ID
+  question*: Opt[string]     # Market question
+  conditionId*: Opt[string]  # Condition ID (used for trading)
+  questionID*: Opt[string]   # Question ID
+  slug*: Opt[string]         # Market slug (URL-friendly identifier)
+  negRisk*: Opt[bool]        # Whether negative risk is enabled
+```
+
+### Setting Market Context
+
+Before trading, set the market on your client:
+
+```nim src/polycule.nim
+proc setMarket*(client: PolyculeClient, marketSlug: string) {.async.}
+```
+
+**Example:**
+
+```nim
+let
+  RPC_URL = parseUri(getEnv("POLYGON_RPC"))
+  PRIVATE_KEY = PrivateKey.fromHex(getEnv("EOA_PRIVATE_KEY")).value()
+  client = await newPolycule(
+    PRIVATE_KEY,
+    PolyculeConfig(rpcUrl: Opt.some(RPC_URL))
+  )
+
+# Set the market context
+await client.setMarket("btc-15min-2024-03-15")
+
+# Now you can trade on this market
+let result = await client.buy(
+  outcomeYes = true,
+  size = Size(10.0),
+  price = Price(0.60)
+)
+```
+
+The `setMarket()` function:
+1. Fetches market details from Gamma API
+2. Resolves the condition ID
+3. Determines if negative risk is enabled
+4. Calculates position IDs for YES/NO tokens
+
+## Order Books
+
+Retrieve the full order book for a specific token.
+
+### Get Single Order Book
+
+```nim src/polycule/clob/public_methods.nim
+proc getOrderBook*(tokenID: string): Future[Opt[OrderBookSummary]]
+```
+
+**Example:**
+
+```nim
+let tokenId = "123456789"  # YES or NO token ID
+let result = await getOrderBook(tokenId)
+
+if result.isSome():
+  let book = result.value()
+  
+  echo "Market: ", book.market.get()
+  echo "Asset ID: ", book.asset_id.get()
+  echo "Tick Size: ", book.tick_size.get()
+  echo "Min Order Size: ", book.min_order_size.get()
+  echo "Neg Risk: ", book.neg_risk.get()
+  echo "Last Trade Price: ", book.last_trade_price.get()
+  echo "Hash: ", book.hash.get()
+  
+  echo "\nBids:"
+  for bid in book.bids.get():
+    echo "  ", bid.price.get(), " x ", bid.size.get()
+  
+  echo "\nAsks:"
+  for ask in book.asks.get():
+    echo "  ", ask.price.get(), " x ", ask.size.get()
+```
+
+### Get Multiple Order Books
+
+Fetch multiple order books in a single request:
+
+```nim src/polycule/clob/public_methods.nim
+proc getOrderBooks*(
+  params: seq[BookParams]
+): Future[Opt[seq[OrderBookSummary]]]
+```
+
+**Example:**
+
+```nim
+let params = @[
+  BookParams(token_id: "123456789", side: BUY),
+  BookParams(token_id: "987654321", side: SELL)
+]
+
+let result = await getOrderBooks(params)
+
+if result.isSome():
+  for book in result.value():
+    echo "Asset: ", book.asset_id.get()
+    echo "Bids: ", book.bids.get().len
+    echo "Asks: ", book.asks.get().len
+    echo "---"
+```
+
+### OrderBookSummary Fields
+
+```nim src/polycule/global.nim
+type OrderBookSummary* = object
+  market*: Opt[string]                # Market identifier
+  asset_id*: Opt[string]              # Asset/token identifier
+  timestamp*: Opt[Timestamp]          # Order book snapshot timestamp
+  bids*: Opt[seq[OrderSummary]]       # Buy orders (bids)
+  asks*: Opt[seq[OrderSummary]]       # Sell orders (asks)
+  min_order_size*: Opt[Size]          # Minimum order size
+  tick_size*: Opt[TickSize]           # Minimum price increment
+  neg_risk*: Opt[bool]                # Negative risk enabled
+  last_trade_price*: Opt[Price]       # Last trade price
+  hash*: Opt[string]                  # Order book hash
+```
+
+### OrderSummary Structure
+
+```nim src/polycule/global.nim
+type OrderSummary* = object
+  price*: Opt[Price]  # Price level
+  size*: Opt[Size]    # Total size at this price
+```
+
+## Tick Sizes
+
+Get the minimum price increment for a token.
+
+### Get Tick Size
+
+```nim src/polycule/clob/public_methods.nim
+proc getTickSize*(tokenId: string): Future[Opt[TickSizeResponse]]
+```
+
+**Example:**
+
+```nim
+let result = await getTickSize("123456789")
+
+if result.isSome():
+  let tickSize = result.value().minimumTickSize.get()
+  echo "Tick size: ", tickSize
+  
+  case tickSize
+  of TICK_0_1:
+    echo "Minimum increment: $0.10"
+  of TICK_0_01:
+    echo "Minimum increment: $0.01"
+  of TICK_0_001:
+    echo "Minimum increment: $0.001"
+  of TICK_0_0001:
+    echo "Minimum increment: $0.0001"
+```
+
+### Tick Size Values
+
+```nim src/polycule/global.nim
+type TickSize* = enum
+  TICK_0_1 = "0.1"       # $0.10 increments
+  TICK_0_01 = "0.01"     # $0.01 increments
+  TICK_0_001 = "0.001"   # $0.001 increments
+  TICK_0_0001 = "0.0001" # $0.0001 increments
+```
+
+### Rounding Configuration
+
+Each tick size has specific rounding rules:
+
+```nim src/polycule/clob/common.nim
+proc getRoundConfig*(tickSize: TickSize): RoundConfig =
+  case tickSize
+  of TICK_0_1:
+    RoundConfig(price: 1, size: 2, amount: 3)
+  of TICK_0_01:
+    RoundConfig(price: 2, size: 2, amount: 4)
+  of TICK_0_001:
+    RoundConfig(price: 3, size: 2, amount: 5)
+  of TICK_0_0001:
+    RoundConfig(price: 4, size: 2, amount: 6)
+```
+
+The `RoundConfig` specifies decimal places for:
+- **price**: Price rounding
+- **size**: Size rounding
+- **amount**: Amount rounding (maker/taker amounts)
+
+## Fee Rates
+
+Get the current fee rate for a token.
+
+### Get Fee Rate
+
+```nim src/polycule/clob/public_methods.nim
+proc getFeeRateBps*(tokenId: string): Future[Opt[FeeRateBpsResponse]]
+```
+
+**Example:**
+
+```nim
+let result = await getFeeRateBps("123456789")
+
+if result.isSome():
+  let feeRateBps = result.value().baseFee.get()
+  let feePercent = float(feeRateBps) / 100.0
+  echo "Fee rate: ", feeRateBps, " bps (", feePercent, "%)"
+```
+
+### Understanding Fee Rates
+
+Fee rates are expressed in **basis points (bps)**, where:
+- 1 bps = 0.01%
+- 100 bps = 1%
+- 10,000 bps = 100%
+
+**Common Fee Rates:**
+
+| Role | Fee Rate | Percentage |
+|------|----------|------------|
+| Maker | 0 bps | 0% |
+| Taker | 100 bps | 1% |
+
+<Info>
+Makers (post-only orders) typically pay **0% fees**, while takers pay **1% fees**.
+</Info>
+
+## Server Time
+
+Get the current server timestamp for proper synchronization.
+
+### Get Server Timestamp
+
+```nim src/polycule/clob/public_methods.nim
+proc getServerTimestamp*(): Future[Opt[Timestamp]]
+```
+
+**Example:**
+
+```nim
+let timestamp = await getServerTimestamp()
+
+if timestamp.isSome():
+  echo "Server time: ", timestamp.get()
+  echo "Current Unix timestamp: ", int64(timestamp.get())
+```
+
+<Note>
+Server timestamps are used for L2 authentication signatures. The SDK handles this automatically.
+</Note>
+
+## Market Data Patterns
+
+Here are common patterns for working with market data:
+
+### Pattern 1: Find Best Prices
+
+```nim
+import polycule
+
+proc findBestPrices(tokenId: string) {.async.} =
+  let book = await getOrderBook(tokenId)
+  
+  if book.isSome():
+    let orderBook = book.value()
+    let bids = orderBook.bids.get()
+    let asks = orderBook.asks.get()
+    
+    if bids.len > 0:
+      echo "Best bid: ", bids[0].price.get(), " x ", bids[0].size.get()
+    
+    if asks.len > 0:
+      echo "Best ask: ", asks[0].price.get(), " x ", asks[0].size.get()
+    
+    if bids.len > 0 and asks.len > 0:
+      let spread = float(asks[0].price.get()) - float(bids[0].price.get())
+      echo "Spread: ", spread
+```
+
+### Pattern 2: Calculate Order Book Depth
+
+```nim
+proc calculateDepth(tokenId: string, priceLevel: float) {.async.} =
+  let book = await getOrderBook(tokenId)
+  
+  if book.isSome():
+    let orderBook = book.value()
+    var bidDepth: float = 0.0
+    var askDepth: float = 0.0
+    
+    # Sum all bids above price level
+    for bid in orderBook.bids.get():
+      if float(bid.price.get()) >= priceLevel:
+        bidDepth += float(bid.size.get())
+    
+    # Sum all asks below price level
+    for ask in orderBook.asks.get():
+      if float(ask.price.get()) <= priceLevel:
+        askDepth += float(ask.size.get())
+    
+    echo "Bid depth at ", priceLevel, ": ", bidDepth
+    echo "Ask depth at ", priceLevel, ": ", askDepth
+```
+
+### Pattern 3: Market Summary
+
+```nim
+proc getMarketSummary(marketSlug: string) {.async.} =
+  # Get market info
+  let market = await getMarket(marketSlug)
+  
+  if market.isNone():
+    echo "Market not found"
+    return
+  
+  let marketInfo = market.value()
+  echo "Market: ", marketInfo.question.get()
+  echo "Slug: ", marketInfo.slug.get()
+  echo "Neg Risk: ", marketInfo.negRisk.get()
+  
+  # Assuming we know token IDs (typically from market details)
+  let tokenIds = ["123456789", "987654321"]  # YES, NO tokens
+  
+  for (i, tokenId) in tokenIds.pairs():
+    let outcome = if i == 0: "YES" else: "NO"
+    echo "\n", outcome, " Token:"
+    
+    # Get order book
+    let book = await getOrderBook(tokenId)
+    if book.isSome():
+      let orderBook = book.value()
+      echo "  Last trade: ", orderBook.last_trade_price.get()
+      echo "  Tick size: ", orderBook.tick_size.get()
+      echo "  Min size: ", orderBook.min_order_size.get()
+      
+      let bids = orderBook.bids.get()
+      let asks = orderBook.asks.get()
+      
+      if bids.len > 0:
+        echo "  Best bid: ", bids[0].price.get()
+      if asks.len > 0:
+        echo "  Best ask: ", asks[0].price.get()
+    
+    # Get fee rate
+    let feeRate = await getFeeRateBps(tokenId)
+    if feeRate.isSome():
+      echo "  Fee rate: ", feeRate.value().baseFee.get(), " bps"
+```
+
+## Crypto Market Helpers
+
+The SDK includes helpers for crypto prediction markets:
+
+```nim examples/log_prices.nim
+let marketSlug = getCryptoCurrentMarketSlug("btc", MINUTE15)
+await client.setMarket(marketSlug)
+```
+
+These helpers automatically generate market slugs for crypto price prediction markets based on the current time window.
+
+## Complete Example
+
+Here's a complete market data analysis example:
+
+```nim
+import polycule
+import std/[asyncdispatch, strformat]
+
+proc analyzeMarket(marketSlug: string) {.async.} =
+  echo "=== Market Analysis ==="
+  
+  # Get market information
+  let market = await getMarket(marketSlug)
+  if market.isNone():
+    echo "Market not found"
+    return
+  
+  let marketInfo = market.value()
+  echo "Market: ", marketInfo.question.get()
+  echo "Condition ID: ", marketInfo.conditionId.get()
+  echo "Neg Risk: ", marketInfo.negRisk.get()
+  
+  # Analyze both YES and NO tokens
+  # In practice, you'd get these token IDs from the market details
+  let tokenIds = [
+    "123456789",  # YES token
+    "987654321"   # NO token
+  ]
+  
+  for (i, tokenId) in tokenIds.pairs():
+    let outcome = if i == 0: "YES" else: "NO"
+    echo "\n--- ", outcome, " Token Analysis ---"
+    
+    # Fetch order book
+    let book = await getOrderBook(tokenId)
+    if book.isNone():
+      echo "Order book not available"
+      continue
+    
+    let orderBook = book.value()
+    let bids = orderBook.bids.get()
+    let asks = orderBook.asks.get()
+    
+    # Market info
+    echo "Last trade price: ", orderBook.last_trade_price.get()
+    echo "Tick size: ", orderBook.tick_size.get()
+    echo "Min order size: ", orderBook.min_order_size.get()
+    
+    # Best prices
+    if bids.len > 0:
+      echo "Best bid: ", bids[0].price.get(), " (", bids[0].size.get(), ")"
+    if asks.len > 0:
+      echo "Best ask: ", asks[0].price.get(), " (", asks[0].size.get(), ")"
+    
+    # Spread
+    if bids.len > 0 and asks.len > 0:
+      let spread = float(asks[0].price.get()) - float(bids[0].price.get())
+      let spreadBps = spread * 10000
+      echo fmt"Spread: {spread:.4f} ({spreadBps:.0f} bps)"
+    
+    # Order book depth
+    var totalBidSize: float = 0.0
+    var totalAskSize: float = 0.0
+    
+    for bid in bids:
+      totalBidSize += float(bid.size.get())
+    for ask in asks:
+      totalAskSize += float(ask.size.get())
+    
+    echo "Total bid depth: ", totalBidSize
+    echo "Total ask depth: ", totalAskSize
+    
+    # Fee rate
+    let feeRate = await getFeeRateBps(tokenId)
+    if feeRate.isSome():
+      let bps = feeRate.value().baseFee.get()
+      echo fmt"Fee rate: {bps} bps ({float(bps)/100:.2f}%)"
+
+proc main() {.async.} =
+  let marketSlug = "btc-15min-2024-03-15"
+  await analyzeMarket(marketSlug)
+
+when isMainModule:
+  waitFor main()
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Trading" icon="chart-line" href="/guides/trading">
+    Start placing buy and sell orders
+  </Card>
+  <Card title="WebSockets" icon="satellite-dish" href="/guides/websockets">
+    Subscribe to real-time market data
+  </Card>
+  <Card title="Order Management" icon="list" href="/guides/order-management">
+    Query and manage your orders
+  </Card>
+</CardGroup>
